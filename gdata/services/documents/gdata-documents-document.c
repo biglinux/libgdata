@@ -470,7 +470,7 @@ gdata_documents_document_get_download_uri (GDataDocumentsDocument *self, const g
 	else if (g_strcmp0 (export_format, GDATA_DOCUMENTS_SPREADSHEET_CSV) == 0)
 		format = "text/csv";
 	else if (g_strcmp0 (export_format, GDATA_DOCUMENTS_SPREADSHEET_ODS) == 0)
-		format = "application/x-vnd.oasis.opendocument.spreadsheet";
+		format = "application/vnd.oasis.opendocument.spreadsheet";
 	else if (g_strcmp0 (export_format, GDATA_DOCUMENTS_SPREADSHEET_XLS) == 0)
 		format = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 	else if (g_strcmp0 (export_format, GDATA_DOCUMENTS_TEXT_ODT) == 0)
