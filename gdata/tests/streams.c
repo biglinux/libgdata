@@ -752,15 +752,15 @@ test_upload_stream_resumable_server_handler_cb (SoupServer *server, SoupMessage 
 				g_assert (message->request_body->data[message->request_body->length] == '\0');
 				g_assert (gdata_test_compare_json_strings (message->request_body->data,
 					"{"
-						"'title': 'Test title!',"
-						"'kind': 'youtube#video',"
-						"'snippet': {"
-							"'title': 'Test title!'"
+						"\"title\": \"Test title!\","
+						"\"kind\": \"youtube#video\","
+						"\"snippet\": {"
+							"\"title\": \"Test title!\""
 						"},"
-						"'status': {"
-							"'privacyStatus': 'public'"
+						"\"status\": {"
+							"\"privacyStatus\": \"public\""
 						"},"
-						"'recordingDetails': {}"
+						"\"recordingDetails\": {}"
 					"}", TRUE) == TRUE);
 
 				break;
@@ -861,17 +861,17 @@ test_upload_stream_resumable_server_handler_cb (SoupServer *server, SoupMessage 
 error: {
 		const gchar *error_response =
 			"{"
-				"'error': {"
-					"'errors': ["
+				"\"error\": {"
+					"\"errors\": ["
 						"{"
-							"'domain': 'global',"
-							"'reason': 'authError',"
-							"'message': 'Invalid token.',"
-							"'location': 'Authorization: GoogleLogin'"
+							"\"domain\": \"global\","
+							"\"reason\": \"authError\","
+							"\"message\": \"Invalid token.\","
+							"\"location\": \"Authorization: GoogleLogin\""
 						"}"
 					"],"
-					"'code': 400,"
-					"'message': 'Invalid token.'"
+					"\"code\": 400,"
+					"\"message\": \"Invalid token.\""
 				"}"
 			"}";
 
@@ -906,16 +906,16 @@ continuation: {
 completion: {
 		const gchar *completion_response =
 			"{"
-				"'kind': 'youtube#video',"
-				"'snippet': {"
-					"'title': 'Test title!',"
-					"'categoryId': '10'"  /* Music */
+				"\"kind\": \"youtube#video\","
+				"\"snippet\": {"
+					"\"title\": \"Test title!\","
+					"\"categoryId\": \"10\""  /* Music */
 				"},"
-				"'status': {"
-					"'privacyStatus': 'public'"
+				"\"status\": {"
+					"\"privacyStatus\": \"public\""
 				"},"
-				"'recordingDetails': {"
-					"'recordingDate': '2005-10-02'"
+				"\"recordingDetails\": {"
+					"\"recordingDate\": \"2005-10-02\""
 				"}"
 			"}";
 
