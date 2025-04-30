@@ -760,14 +760,6 @@ upload_update_document (GDataDocumentsService *self, GDataDocumentsDocument *doc
                         GDataDocumentsFolder *folder, goffset content_length, const gchar *method, const gchar *upload_uri,
 			GCancellable *cancellable)
 {
-	/* HACK: Corrects a bug on spreadsheet content types handling
-	 * The content type for ODF spreadsheets is "application/vnd.oasis.opendocument.spreadsheet" for my ODF spreadsheet;
-	 * but Google Documents' spreadsheet service is waiting for "application/x-vnd.oasis.opendocument.spreadsheet"
-	 * and nothing else.
-	 * Bug filed with Google: http://code.google.com/p/gdata-issues/issues/detail?id=1127 */
-	if (strcmp (content_type, "application/vnd.oasis.opendocument.spreadsheet") == 0)
-		content_type = "application/x-vnd.oasis.opendocument.spreadsheet";
-
 	if (folder != NULL)
 		add_folder_link_to_entry (GDATA_DOCUMENTS_ENTRY (document), folder);
 
