@@ -160,7 +160,7 @@ get_rules_thread (GTask *task, gpointer source_object, gpointer task_data, GCanc
 }
 
 /**
- * gdata_access_handler_get_rules_async:
+ * gdata_access_handler_get_rules_async: (finish-func gdata_service_query_finish):
  * @self: a #GDataAccessHandler
  * @service: a #GDataService
  * @cancellable: (allow-none): optional #GCancellable object, or %NULL

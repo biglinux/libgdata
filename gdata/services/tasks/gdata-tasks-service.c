@@ -340,7 +340,7 @@ gdata_tasks_service_query_all_tasklists (GDataTasksService *self, GDataQuery *qu
 }
 
 /**
- * gdata_tasks_service_query_all_tasklists_async:
+ * gdata_tasks_service_query_all_tasklists_async: (finish-func gdata_service_query_finish):
  * @self: a #GDataTasksService
  * @query: (allow-none): a #GDataQuery with the query parameters, or %NULL
  * @cancellable: (allow-none): optional #GCancellable object, or %NULL
@@ -443,7 +443,7 @@ gdata_tasks_service_query_tasks (GDataTasksService *self, GDataTasksTasklist *ta
 }
 
 /**
- * gdata_tasks_service_query_tasks_async:
+ * gdata_tasks_service_query_tasks_async: (finish-func gdata_service_query_finish):
  * @self: a #GDataTasksService
  * @tasklist: a #GDataTasksTasklist
  * @query: (allow-none): a #GDataQuery with the query parameters, or %NULL
@@ -538,7 +538,7 @@ gdata_tasks_service_insert_task (GDataTasksService *self, GDataTasksTask *task, 
 }
 
 /**
- * gdata_tasks_service_insert_task_async:
+ * gdata_tasks_service_insert_task_async: (finish-func gdata_service_insert_entry_finish):
  * @self: a #GDataTasksService
  * @task: the #GDataTasksTask to insert
  * @tasklist: #GDataTasksTasklist to insert into
@@ -609,7 +609,7 @@ gdata_tasks_service_insert_tasklist (GDataTasksService *self, GDataTasksTasklist
 }
 
 /**
- * gdata_tasks_service_insert_tasklist_async:
+ * gdata_tasks_service_insert_tasklist_async: (finish-func gdata_service_insert_entry_finish):
  * @self: a #GDataTasksService
  * @tasklist: #GDataTasksTasklist to insert
  * @cancellable: (allow-none): optional #GCancellable object, or %NULL
@@ -670,7 +670,7 @@ gdata_tasks_service_delete_task (GDataTasksService *self, GDataTasksTask *task, 
 }
 
 /**
- * gdata_tasks_service_delete_task_async:
+ * gdata_tasks_service_delete_task_async: (finish-func gdata_service_delete_entry_finish):
  * @self: a #GDataTasksService
  * @task: #GDataTasksTask to delete
  * @cancellable: (allow-none): optional #GCancellable object, or %NULL
@@ -727,7 +727,7 @@ gdata_tasks_service_delete_tasklist (GDataTasksService *self, GDataTasksTasklist
 }
 
 /**
- * gdata_tasks_service_delete_tasklist_async:
+ * gdata_tasks_service_delete_tasklist_async: (finish-func gdata_service_delete_entry_finish):
  * @self: a #GDataTasksService
  * @tasklist: #GDataTasksTasklist to delete
  * @cancellable: (allow-none): optional #GCancellable object, or %NULL
@@ -784,7 +784,7 @@ gdata_tasks_service_update_task (GDataTasksService *self, GDataTasksTask *task, 
 }
 
 /**
- * gdata_tasks_service_update_task_async:
+ * gdata_tasks_service_update_task_async: (finish-func gdata_service_update_entry_finish):
  * @self: a #GDataTasksService
  * @task: #GDataTasksTask to update
  * @cancellable: (allow-none): optional #GCancellable object, or %NULL
@@ -841,7 +841,7 @@ gdata_tasks_service_update_tasklist (GDataTasksService *self, GDataTasksTasklist
 }
 
 /**
- * gdata_tasks_service_update_tasklist_async:
+ * gdata_tasks_service_update_tasklist_async: (finish-func gdata_service_update_entry_finish):
  * @self: a #GDataTasksService
  * @tasklist: #GDataTasksTasklist to update
  * @cancellable: (allow-none): optional #GCancellable object, or %NULL

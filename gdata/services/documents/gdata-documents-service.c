@@ -592,7 +592,7 @@ gdata_documents_service_query_documents (GDataDocumentsService *self, GDataDocum
 }
 
 /**
- * gdata_documents_service_query_documents_async:
+ * gdata_documents_service_query_documents_async: (finish-func gdata_service_query_finish):
  * @self: a #GDataDocumentsService
  * @query: (allow-none): a #GDataDocumentsQuery with the query parameters, or %NULL
  * @cancellable: (allow-none): optional #GCancellable object, or %NULL
@@ -689,7 +689,7 @@ gdata_documents_service_query_drives (GDataDocumentsService *self, GDataDocument
 }
 
 /**
- * gdata_documents_service_query_drives_async:
+ * gdata_documents_service_query_drives_async: (finish-func gdata_service_query_finish):
  * @self: a #GDataDocumentsService
  * @query: (nullable): a #GDataDocumentsDriveQuery with the query parameters, or %NULL
  * @cancellable: (nullable): optional #GCancellable object, or %NULL
