@@ -675,12 +675,13 @@ parse_json (GDataParsable *parsable, JsonReader *reader, gpointer user_data, GEr
 		g_free (alternate_uri);
 		return success;
 	} else if (gdata_parser_string_from_json_member (reader, "mimeType", P_DEFAULT, &mime_type, &success, error) == TRUE) {
-		if (success)
+		if (success) {
 			if (strcmp (mime_type, "application/x-vnd.oasis.opendocument.spreadsheet") == 0) {
 				gdata_documents_utils_add_content_type (GDATA_DOCUMENTS_ENTRY (parsable), "application/vnd.oasis.opendocument.spreadsheet");
 			} else {
 				gdata_documents_utils_add_content_type (GDATA_DOCUMENTS_ENTRY (parsable), mime_type);
 			}
+		}
 		g_free (mime_type);
 		return success;
 	} else if (gdata_parser_int64_time_from_json_member (reader, "lastViewedByMeDate", P_DEFAULT, &(priv->last_viewed), &success, error) == TRUE ||
