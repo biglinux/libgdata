@@ -30,6 +30,8 @@ build_stable:
   before_script:
     - dnf update -y --nogpgcheck
     - dnf install -y --nogpgcheck $DEPENDENCIES
+    - git clone --branch=0.5.5 --depth=1 https://gitlab.freedesktop.org/pwithnall/uhttpmock.git
+    - cd uhttpmock && meson . _build --prefix=/usr && meson install -C _build && cd ..
   script:
     - meson . _build --prefix=/usr
         -Dgtk=enabled
