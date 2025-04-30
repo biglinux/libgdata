@@ -8,7 +8,7 @@ variables:
     libxml2-devel
     gtk3-devel
     libsoup-devel
-    gcr3-devel
+    gcr-devel
     gnome-online-accounts-devel
     uhttpmock-devel
     gtk-doc
@@ -22,7 +22,7 @@ variables:
     libabigail
   OLD_ABI_DEPENDENCIES:
     liboauth-devel
-  LAST_ABI_BREAK: 27fb43ff72435854984f1c4ed35deff96d3c652a
+  LAST_ABI_BREAK: 772d061e9f8bb2b6086d9b25f6fcc9db51447996
 
 build_stable:
   tags:
