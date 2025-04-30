@@ -475,7 +475,7 @@ gdata_calendar_service_query_all_calendars (GDataCalendarService *self, GDataQue
 }
 
 /**
- * gdata_calendar_service_query_all_calendars_async:
+ * gdata_calendar_service_query_all_calendars_async: (finish-func gdata_service_query_finish):
  * @self: a #GDataCalendarService
  * @query: (allow-none): a #GDataQuery with the query parameters, or %NULL
  * @cancellable: (allow-none): optional #GCancellable object, or %NULL
@@ -573,7 +573,7 @@ gdata_calendar_service_query_own_calendars (GDataCalendarService *self, GDataQue
 }
 
 /**
- * gdata_calendar_service_query_own_calendars_async:
+ * gdata_calendar_service_query_own_calendars_async: (finish-func gdata_service_query_finish):
  * @self: a #GDataCalendarService
  * @query: (allow-none): a #GDataQuery with the query parameters, or %NULL
  * @cancellable: (allow-none): optional #GCancellable object, or %NULL
@@ -692,7 +692,7 @@ gdata_calendar_service_query_events (GDataCalendarService *self, GDataCalendarCa
 }
 
 /**
- * gdata_calendar_service_query_events_async:
+ * gdata_calendar_service_query_events_async: (finish-func gdata_service_query_finish):
  * @self: a #GDataCalendarService
  * @calendar: a #GDataCalendarCalendar
  * @query: (allow-none): a #GDataQuery with the query parameters, or %NULL
@@ -798,7 +798,7 @@ gdata_calendar_service_insert_calendar_event (GDataCalendarService *self,
 }
 
 /**
- * gdata_calendar_service_insert_calendar_event_async:
+ * gdata_calendar_service_insert_calendar_event_async: (finish-func gdata_service_insert_entry_finish):
  * @self: a #GDataCalendarService
  * @calendar: the #GDataCalendarCalendar to insert the event into
  * @event: the #GDataCalendarEvent to insert

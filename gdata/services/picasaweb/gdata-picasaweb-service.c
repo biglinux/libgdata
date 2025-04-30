@@ -388,7 +388,7 @@ gdata_picasaweb_service_query_all_albums (GDataPicasaWebService *self, GDataQuer
 }
 
 /**
- * gdata_picasaweb_service_query_all_albums_async:
+ * gdata_picasaweb_service_query_all_albums_async: (finish-func gdata_service_query_finish):
  * @self: a #GDataPicasaWebService
  * @query: (allow-none): a #GDataQuery with the query parameters, or %NULL
  * @username: (allow-none): the username of the user whose albums you wish to retrieve, or %NULL
@@ -511,7 +511,7 @@ gdata_picasaweb_service_query_files (GDataPicasaWebService *self, GDataPicasaWeb
 }
 
 /**
- * gdata_picasaweb_service_query_files_async:
+ * gdata_picasaweb_service_query_files_async: (finish-func gdata_service_query_finish):
  * @self: a #GDataPicasaWebService
  * @album: (allow-none): a #GDataPicasaWebAlbum from which to retrieve the files, or %NULL
  * @query: (allow-none): a #GDataQuery with the query parameters, or %NULL
@@ -708,7 +708,7 @@ gdata_picasaweb_service_insert_album (GDataPicasaWebService *self, GDataPicasaWe
 }
 
 /**
- * gdata_picasaweb_service_insert_album_async:
+ * gdata_picasaweb_service_insert_album_async: (finish-func gdata_service_insert_entry_finish):
  * @self: a #GDataPicasaWebService
  * @album: a #GDataPicasaWebAlbum to create on the server
  * @cancellable: (allow-none): optional #GCancellable object, or %NULL
