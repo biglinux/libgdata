@@ -42,9 +42,10 @@ print_usage (char *argv[])
 static gchar *
 tv_to_iso8601_date (gint64 tv)
 {
+	time_t t = tv;
 	struct tm *tm;
 
-	tm = gmtime (&tv);
+	tm = gmtime (&t);
 
 	return g_strdup_printf ("%04d-%02d-%02d",
 	                        tm->tm_year + 1900,
