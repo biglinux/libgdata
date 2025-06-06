@@ -19,260 +19,27 @@
  * License along with GData Client.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/**
- * SECTION:gdata-documents-service
- * @short_description: GData Documents service object
- * @stability: Stable
- * @include: gdata/services/documents/gdata-documents-service.h
- *
- * #GDataDocumentsService is a subclass of #GDataService for communicating with the GData API of Google Drive. It supports querying
- * for, inserting, editing and deleting documents, as well as a folder hierarchy.
- * The API is named ‘documents’ rather than ‘drive’ as it used to use the Google
- * Documents API, which has since been deprecated.
- *
- * For more details of Google Drive's GData API, see the
- * <ulink type="http" url="https://developers.google.com/drive/v2/web/about-sdk">
- * online documentation</ulink>.
- *
- * Fore more details about the spreadsheet downloads handling, see the
- * <ulink type="http" url="http://groups.google.com/group/Google-Docs-Data-APIs/browse_thread/thread/bfc50e94e303a29a?pli=1">
- * online explanation about the problem</ulink>.
- *
- * <example>
- * 	<title>Uploading a Document from Disk</title>
- * 	<programlisting>
- *	GDataDocumentsService *service;
- *	GDataDocumentsDocument *document, *uploaded_document;
- *	GFile *document_file;
- *	GDataDocumentsFolder *destination_folder;
- *	GFileInfo *file_info;
- *	const gchar *slug, *content_type;
- *	GFileInputStream *file_stream;
- *	GDataUploadStream *upload_stream;
- *	GError *error = NULL;
- *
- *	/<!-- -->* Create a service *<!-- -->/
- *	service = create_documents_service ();
- *
- *	/<!-- -->* Get the document file to upload and the folder to upload it into *<!-- -->/
- *	document_file = g_file_new_for_path ("document.odt");
- *	destination_folder = query_user_for_destination_folder (service);
- *
- *	/<!-- -->* Get the file's display name and content type *<!-- -->/
- *	file_info = g_file_query_info (document_file, G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME "," G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
- *	                               G_FILE_QUERY_INFO_NONE, NULL, &error);
- *
- *	if (error != NULL) {
- *		g_error ("Error getting document file information: %s", error->message);
- *		g_error_free (error);
- *		g_object_unref (destination_folder);
- *		g_object_unref (document_file);
- *		g_object_unref (service);
- *		return;
- *	}
- *
- *	slug = g_file_info_get_display_name (file_info);
- *	content_type = g_file_info_get_content_type (file_info);
- *
- *	/<!-- -->* Get an input stream for the file *<!-- -->/
- *	file_stream = g_file_read (document_file, NULL, &error);
- *
- *	g_object_unref (document_file);
- *
- *	if (error != NULL) {
- *		g_error ("Error getting document file stream: %s", error->message);
- *		g_error_free (error);
- *		g_object_unref (file_info);
- *		g_object_unref (destination_folder);
- *		g_object_unref (service);
- *		return;
- *	}
- *
- *	/<!-- -->* Create the document metadata to upload *<!-- -->/
- *	document = gdata_documents_text_new (NULL);
- *	gdata_entry_set_title (GDATA_ENTRY (document), "Document Title");
- *
- *	/<!-- -->* Get an upload stream for the document *<!-- -->/
- *	upload_stream = gdata_documents_service_upload_document (service, document, slug, content_type, destination_folder, NULL, &error);
- *
- *	g_object_unref (document);
- *	g_object_unref (file_info);
- *	g_object_unref (destination_folder);
- *
- *	if (error != NULL) {
- *		g_error ("Error getting upload stream: %s", error->message);
- *		g_error_free (error);
- *		g_object_unref (file_stream);
- *		g_object_unref (service);
- *		return;
- *	}
- *
- *	/<!-- -->* Upload the document. This is a blocking operation, and should normally be done asynchronously. *<!-- -->/
- *	g_output_stream_splice (G_OUTPUT_STREAM (upload_stream), G_INPUT_STREAM (file_stream),
- *	                        G_OUTPUT_STREAM_SPLICE_CLOSE_SOURCE | G_OUTPUT_STREAM_SPLICE_CLOSE_TARGET, NULL, &error);
- *
- *	g_object_unref (file_stream);
- *
- *	if (error != NULL) {
- *		g_error ("Error splicing streams: %s", error->message);
- *		g_error_free (error);
- *		g_object_unref (upload_stream);
- *		g_object_unref (service);
- *		return;
- *	}
- *
- *	/<!-- -->* Finish off the upload by parsing the returned updated document metadata entry *<!-- -->/
- *	uploaded_document = gdata_documents_service_finish_upload (service, upload_stream, &error);
- *
- *	g_object_unref (upload_stream);
- *	g_object_unref (service);
- *
- *	if (error != NULL) {
- *		g_error ("Error uploading document: %s", error->message);
- *		g_error_free (error);
- *		return;
- *	}
- *
- *	/<!-- -->* Do something with the uploaded document *<!-- -->/
- *
- *	g_object_unref (uploaded_document);
- * 	</programlisting>
- * </example>
- *
- * The Drive service can be manipulated using batch operations, too. See the
- * <ulink type="http" url="https://developers.google.com/google-apps/documents-list/#batching_acl_requests">online documentation on batch
- * operations</ulink> for more information.
- *
- * <example>
- * 	<title>Performing a Batch Operation on Documents</title>
- * 	<programlisting>
- *	GDataDocumentsService *service;
- *	GDataBatchOperation *operation;
- *	GDataFeed *feed;
- *	GDataLink *batch_link;
- *	GList *i;
- *	GError *error = NULL;
- *
- *	/<!-- -->* Create a service *<!-- -->/
- *	service = create_documents_service ();
- *
- *	/<!-- -->* Create the batch operation; this requires that we have done a query first so that we can get the batch link *<!-- -->/
- *	feed = do_some_query (service);
- *	batch_link = gdata_feed_look_up_link (feed, GDATA_LINK_BATCH);
- *	operation = gdata_batchable_create_operation (GDATA_BATCHABLE (service), gdata_link_get_uri (batch_link));
- *	g_object_unref (feed);
- *
- *	gdata_batch_operation_add_query (operation, presentation_entry_id_to_query, GDATA_TYPE_DOCUMENTS_PRESENTATION,
- *	                                 (GDataBatchOperationCallback) batch_query_cb, user_data);
- *	gdata_batch_operation_add_insertion (operation, new_entry, (GDataBatchOperationCallback) batch_insertion_cb, user_data);
- *	gdata_batch_operation_add_update (operation, old_entry, (GDataBatchOperationCallback) batch_update_cb, user_data);
- *	gdata_batch_operation_add_deletion (operation, entry_to_delete, (GDataBatchOperationCallback) batch_deletion_cb, user_data);
- *
- *	/<!-- -->* Run the batch operation and handle the results in the various callbacks *<!-- -->/
- *	gdata_test_batch_operation_run (operation, NULL, &error);
- *
- *	g_object_unref (operation);
- *	g_object_unref (service);
- *
- *	if (error != NULL) {
- *		g_error ("Error running batch operation: %s", error->message);
- *		g_error_free (error);
- *		return;
- *	}
- *
- *	static void
- *	batch_query_cb (guint operation_id, GDataBatchOperationType operation_type, GDataEntry *entry, GError *error, gpointer user_data)
- *	{
- *		/<!-- -->* operation_type == GDATA_BATCH_OPERATION_QUERY *<!-- -->/
- *		/<!-- -->* Reference and do something with the returned entry. *<!-- -->/
- *	}
- *
- *	static void
- *	batch_insertion_cb (guint operation_id, GDataBatchOperationType operation_type, GDataEntry *entry, GError *error, gpointer user_data)
- *	{
- *		/<!-- -->* operation_type == GDATA_BATCH_OPERATION_INSERTION *<!-- -->/
- *		/<!-- -->* Reference and do something with the returned entry. *<!-- -->/
- *	}
- *
- *	static void
- *	batch_update_cb (guint operation_id, GDataBatchOperationType operation_type, GDataEntry *entry, GError *error, gpointer user_data)
- *	{
- *		/<!-- -->* operation_type == GDATA_BATCH_OPERATION_UPDATE *<!-- -->/
- *		/<!-- -->* Reference and do something with the returned entry. *<!-- -->/
- *	}
- *
- *	static void
- *	batch_deletion_cb (guint operation_id, GDataBatchOperationType operation_type, GDataEntry *entry, GError *error, gpointer user_data)
- *	{
- *		/<!-- -->* operation_type == GDATA_BATCH_OPERATION_DELETION, entry == NULL *<!-- -->/
- *	}
- * 	</programlisting>
- * </example>
- *
- * Starred documents are denoted by being in the %GDATA_CATEGORY_SCHEMA_LABELS_STARRED category of the %GDATA_CATEGORY_SCHEMA_LABELS schema. Documents
- * can be starred or unstarred simply by adding or removing this category from them and updating the document:
- *
- * <example>
- * 	<title>Starring a Document</title>
- * 	<programlisting>
- *	GDataDocumentsService *service;
- *	GDataDocumentsEntry *document, *updated_document;
- *	GDataCategory *starred_category;
- *	GError *error = NULL;
- *
- *	/<!-- -->* Create a service and retrieve the document to be starred *<!-- -->/
- *	service = create_documents_service ();
- *	document = get_document_to_be_starred (service);
- *
- *	/<!-- -->* Add the “starred” category to the document *<!-- -->/
- *	starred_category = gdata_category_new (GDATA_CATEGORY_SCHEMA_LABELS_STARRED, GDATA_CATEGORY_SCHEMA_LABELS, "starred");
- *	gdata_entry_add_category (GDATA_ENTRY (document), starred_category);
- *	g_object_unref (starred_category);
- *
- *	/<!-- -->* Propagate the updated document to the server *<!-- -->/
- *	updated_document = GDATA_DOCUMENTS_ENTRY (gdata_service_update_entry (GDATA_SERVICE (service),
- *	                                                                      gdata_documents_service_get_primary_authorization_domain (),
- *	                                                                      GDATA_ENTRY (document), NULL, &error));
- *
- *	g_object_unref (document);
- *	g_object_unref (service);
- *
- *	if (error != NULL) {
- *		g_error ("Error starring document: %s", error->message);
- *		g_error_free (error);
- *		return;
- *	}
- *
- *	/<!-- -->* Do something with the newly-starred document, like update it in the UI *<!-- -->/
- *
- *	g_object_unref (updated_document);
- * 	</programlisting>
- * </example>
- *
- * Since: 0.4.0
- */
+#include <config.h> // Must be first
 
-#include <config.h>
 #include <glib.h>
 #include <glib/gi18n-lib.h>
-#include <libsoup-3.0/libsoup/soup.h>
-#include <string.h>
-/* Ensure GUri is available if not pulled in by soup.h or glib.h already for GUri */
 #include <glib/guri.h>
+#include <string.h>
 
-/* Add direct include in case of ordering issues via other headers */
-#include <libsoup-3.0/libsoup/soup.h>
-#include <libsoup-3.0/libsoup/soup-status.h>
-#include <libsoup-3.0/libsoup/soup-message.h>
-
-#include "gdata-documents-property.h"
-#include "gdata-documents-service.h"
-#include "gdata-documents-utils.h"
-#include "gdata-documents-drive.h"
-#include "gdata-batchable.h"
-#include "gdata-service.h"
+// Central private header, should include libsoup and other common internal deps
 #include "gdata-private.h"
-#include "gdata-upload-stream.h"
+
+// Public API for this object
+#include "gdata/services/documents/gdata-documents-service.h"
+
+// Other GData internal headers
+#include "gdata/services/documents/gdata-documents-property.h"
+#include "gdata/services/documents/gdata-documents-utils.h"
+#include "gdata/services/documents/gdata-documents-drive.h"
+#include "gdata/gdata-batchable.h"
+/* gdata-service.h is already included via gdata-private.h or gdata-documents-service.h chain */
+#include "gdata/gdata-upload-stream.h"
+
 
 GQuark
 gdata_documents_service_error_quark (void)
@@ -326,31 +93,18 @@ append_query_headers (GDataService *self, GDataAuthorizationDomain *domain, Soup
 			g_autoptr(GUri) v2_guri = NULL;
 			SoupMessageHeaders *request_headers = soup_message_get_request_headers (message);
 
-			/* Content length header for resumable uploads. Only set it if this looks like the initial request of a resumable upload, and
-			 * if no content length has been set previously.
-			 * This allows methods like gdata_service_insert_entry() (which aren't resumable-upload-aware) to continue working for creating
-			 * documents with metadata only, by simulating the initial request of a resumable upload as described here:
-			 * https://developers.google.com/google-apps/documents-list/#creating_a_new_document_or_file_with_metadata_only */
 			soup_message_headers_replace (request_headers, "X-Upload-Content-Length", "0");
-
-			/* Also set the encoding to be content length encoding. */
 			soup_message_headers_set_encoding (request_headers, SOUP_ENCODING_CONTENT_LENGTH);
 
-			/* HACK: Work around http://code.google.com/a/google.com/p/apps-api-issues/issues/detail?id=3033 by changing the upload URI
-			 * to the v2 API's upload URI. Grrr. */
 			v2_upload_uri_str = g_strconcat (_gdata_service_get_scheme (), "://docs.google.com/feeds/default/private/full",
 			                                 v3_pos + strlen ("://docs.google.com/feeds/upload/create-session/default/private/full"), NULL);
 			v2_guri = g_uri_parse (v2_upload_uri_str, G_URI_FLAGS_NONE, NULL);
 			if (v2_guri) {
 				soup_message_set_uri (message, v2_guri);
 			}
-			/* g_uri_unref is handled by g_autoptr */
-			/* g_free is handled by g_autofree */
 		}
-		/* g_free is handled by g_autofree */
 	}
 
-	/* Chain up to the parent class */
 	GDATA_SERVICE_CLASS (gdata_documents_service_parent_class)->append_query_headers (self, domain, message);
 }
 
@@ -365,16 +119,6 @@ get_authorization_domains (void)
 	return authorization_domains;
 }
 
-/**
- * gdata_documents_service_new:
- * @authorizer: (allow-none): a #GDataAuthorizer to authorize the service's requests, or %NULL
- *
- * Creates a new #GDataDocumentsService using the given #GDataAuthorizer. If @authorizer is %NULL, all requests are made as an unauthenticated user.
- *
- * Return value: a new #GDataDocumentsService, or %NULL; unref with g_object_unref()
- *
- * Since: 0.9.0
- */
 GDataDocumentsService *
 gdata_documents_service_new (GDataAuthorizer *authorizer)
 {
@@ -385,58 +129,18 @@ gdata_documents_service_new (GDataAuthorizer *authorizer)
 	                     NULL);
 }
 
-/**
- * gdata_documents_service_get_primary_authorization_domain:
- *
- * The primary #GDataAuthorizationDomain for interacting with Google Documents. This will not normally need to be used, as it's used internally
- * by the #GDataDocumentsService methods. However, if using the plain #GDataService methods to implement custom queries or requests which libgdata
- * does not support natively, then this domain may be needed to authorize the requests.
- *
- * The domain never changes, and is interned so that pointer comparison can be used to differentiate it from other authorization domains.
- *
- * Return value: (transfer none): the service's authorization domain
- *
- * Since: 0.9.0
- */
 GDataAuthorizationDomain *
 gdata_documents_service_get_primary_authorization_domain (void)
 {
 	return get_documents_authorization_domain ();
 }
 
-/**
- * gdata_documents_service_get_spreadsheet_authorization_domain:
- *
- * The #GDataAuthorizationDomain for interacting with spreadsheet data. This will not normally need to be used, as it's automatically used internally
- * by the #GDataDocumentsService methods. However, if using the plain #GDataService methods to implement custom queries or requests which libgdata
- * does not support natively, then this domain may be needed to authorize the requests which pertain to the Google Spreadsheets Data API, such as
- * requests to download or upload spreadsheet documents.
- *
- * The domain never changes, and is interned so that pointer comparison can be used to differentiate it from other authorization domains.
- *
- * Return value: (transfer none): the service's authorization domain
- *
- * Since: 0.9.0
- */
 GDataAuthorizationDomain *
 gdata_documents_service_get_spreadsheet_authorization_domain (void)
 {
 	return get_spreadsheets_authorization_domain ();
 }
 
-/**
- * gdata_documents_service_get_metadata:
- * @self: a #GDataDocumentsService
- * @cancellable: (allow-none): optional #GCancellable object, or %NULL
- * @error: a #GError, or %NULL
- *
- * Gets a #GDataDocumentsMetadata object containing metadata about the documents
- * service itself, like how large the user quota is.
- *
- * Return value: (transfer full): the service's metadata object; unref with g_object_unref()
- *
- * Since: 0.17.9
- */
 GDataDocumentsMetadata *
 gdata_documents_service_get_metadata (GDataDocumentsService *self, GCancellable *cancellable, GError **error)
 {
@@ -451,15 +155,12 @@ gdata_documents_service_get_metadata (GDataDocumentsService *self, GCancellable 
 
 	message = _gdata_service_build_message (GDATA_SERVICE (self), get_documents_authorization_domain (), SOUP_METHOD_GET, uri, NULL, FALSE);
 
-	/* Send the message */
 	status = _gdata_service_send_message (GDATA_SERVICE (self), message, cancellable, error);
 
 	if (status == SOUP_STATUS_NONE || status == SOUP_STATUS_CANCELLED) {
-		/* Redirect error or cancelled */
 		g_object_unref (message);
 		return NULL;
 	} else if (status != SOUP_STATUS_OK) {
-		/* Error */
 		GDataServiceClass *klass = GDATA_SERVICE_GET_CLASS (self);
 		GBytes *response_bytes_ptr = NULL;
 		const char *response_data = NULL;
@@ -479,7 +180,6 @@ gdata_documents_service_get_metadata (GDataDocumentsService *self, GCancellable 
 		return NULL;
 	}
 
-	/* Parse the JSON; and update the entry */
 	GBytes *response_bytes_ptr = soup_message_get_response_body_bytes (message);
 	gsize response_length = 0;
 	const void *response_data = NULL;
@@ -505,7 +205,6 @@ get_metadata_thread (GTask *task, gpointer source_object, gpointer task_data, GC
 	g_autoptr(GDataDocumentsMetadata) metadata = NULL;
 	g_autoptr(GError) error = NULL;
 
-	/* Copy the metadata and return */
 	metadata = gdata_documents_service_get_metadata (service, cancellable, &error);
 	if (error != NULL)
 		g_task_return_error (task, g_steal_pointer (&error));
@@ -513,23 +212,6 @@ get_metadata_thread (GTask *task, gpointer source_object, gpointer task_data, GC
 		g_task_return_pointer (task, g_steal_pointer (&metadata), g_object_unref);
 }
 
-/**
- * gdata_documents_service_get_metadata_async:
- * @self: a #GDataDocumentsService
- * @cancellable: (allow-none): optional #GCancellable object, or %NULL
- * @callback: a #GAsyncReadyCallback to call when the operation is finished, or %NULL
- * @user_data: (closure): data to pass to the @callback function
- *
- * Gets a #GDataDocumentsMetadata object containing metadata about the documents
- * service itself, like how large the user quota is.
- *
- * For more details, see gdata_documents_service_get_metadata(), which is the synchronous version of this function.
- *
- * When the operation is finished, @callback will be called. You can then call gdata_documents_service_get_metadata_finish() to get the results
- * of the operation.
- *
- * Since: 0.17.9
- */
 void
 gdata_documents_service_get_metadata_async (GDataDocumentsService *self, GCancellable *cancellable,
                                             GAsyncReadyCallback callback, gpointer user_data)
@@ -544,18 +226,6 @@ gdata_documents_service_get_metadata_async (GDataDocumentsService *self, GCancel
 	g_task_run_in_thread (task, get_metadata_thread);
 }
 
-/**
- * gdata_documents_service_get_metadata_finish:
- * @self: a #GDataDocumentsService
- * @async_result: a #GAsyncResult
- * @error: a #GError, or %NULL
- *
- * Finish an asynchronous operation to get a #GDataDocumentsMetadata started with gdata_documents_service_get_metadata_async().
- *
- * Return value: (transfer full): the service's metadata object; unref with g_object_unref()
- *
- * Since: 0.17.9
- */
 GDataDocumentsMetadata *
 gdata_documents_service_get_metadata_finish (GDataDocumentsService *self, GAsyncResult *async_result, GError **error)
 {
@@ -571,29 +241,9 @@ gdata_documents_service_get_metadata_finish (GDataDocumentsService *self, GAsync
 static gchar *
 _query_documents_build_request_uri (GDataDocumentsQuery *query)
 {
-	/* If we want to query for documents contained in a folder, the URI is different.
-	 * The "/[folder:id]" suffix is added by the GDataQuery later. */
 	return g_strdup ("https://www.googleapis.com/drive/v2/files");
 }
 
-/**
- * gdata_documents_service_query_documents:
- * @self: a #GDataDocumentsService
- * @query: (allow-none): a #GDataDocumentsQuery with the query parameters, or %NULL
- * @cancellable: (allow-none): optional #GCancellable object, or %NULL
- * @progress_callback: (allow-none) (scope call) (closure progress_user_data): a #GDataQueryProgressCallback to call when an entry is loaded, or %NULL
- * @progress_user_data: (closure): data to pass to the @progress_callback function
- * @error: a #GError, or %NULL
- *
- * Queries the service to return a list of documents matching the given @query. Note that @query has to be a #GDataDocumentsQuery, rather than just
- * a #GDataQuery, as it uses the folder ID specified in #GDataDocumentsQuery:folder-id.
- *
- * For more details, see gdata_service_query().
- *
- * Return value: (transfer full): a #GDataDocumentsFeed of query results; unref with g_object_unref()
- *
- * Since: 0.4.0
- */
 GDataDocumentsFeed *
 gdata_documents_service_query_documents (GDataDocumentsService *self, GDataDocumentsQuery *query, GCancellable *cancellable,
                                          GDataQueryProgressCallback progress_callback, gpointer progress_user_data,
@@ -607,7 +257,6 @@ gdata_documents_service_query_documents (GDataDocumentsService *self, GDataDocum
 	g_return_val_if_fail (cancellable == NULL || G_IS_CANCELLABLE (cancellable), NULL);
 	g_return_val_if_fail (error == NULL || *error == NULL, NULL);
 
-	/* Ensure we're authenticated first */
 	if (gdata_authorizer_is_authorized_for_domain (gdata_service_get_authorizer (GDATA_SERVICE (self)),
 	                                               get_documents_authorization_domain ()) == FALSE) {
 		g_set_error_literal (error, GDATA_SERVICE_ERROR, GDATA_SERVICE_ERROR_AUTHENTICATION_REQUIRED,
@@ -623,26 +272,6 @@ gdata_documents_service_query_documents (GDataDocumentsService *self, GDataDocum
 	return GDATA_DOCUMENTS_FEED (feed);
 }
 
-/**
- * gdata_documents_service_query_documents_async: (finish-func gdata_service_query_finish):
- * @self: a #GDataDocumentsService
- * @query: (allow-none): a #GDataDocumentsQuery with the query parameters, or %NULL
- * @cancellable: (allow-none): optional #GCancellable object, or %NULL
- * @progress_callback: (allow-none) (closure progress_user_data): a #GDataQueryProgressCallback to call when an entry is loaded, or %NULL
- * @progress_user_data: (closure): data to pass to the @progress_callback function
- * @destroy_progress_user_data: (allow-none): the function to call when @progress_callback will not be called any more, or %NULL. This function will be
- * called with @progress_user_data as a parameter and can be used to free any memory allocated for it.
- * @callback: a #GAsyncReadyCallback to call when authentication is finished
- * @user_data: (closure): data to pass to the @callback function
- *
- * Queries the service to return a list of documents matching the given @query. @self and
- * @query are both reffed when this function is called, so can safely be unreffed after this function returns.
- *
- * For more details, see gdata_documents_service_query_documents(), which is the synchronous version of this function,
- * and gdata_service_query_async(), which is the base asynchronous query function.
- *
- * Since: 0.9.1
- */
 void
 gdata_documents_service_query_documents_async (GDataDocumentsService *self, GDataDocumentsQuery *query, GCancellable *cancellable,
                                                GDataQueryProgressCallback progress_callback, gpointer progress_user_data,
@@ -656,7 +285,6 @@ gdata_documents_service_query_documents_async (GDataDocumentsService *self, GDat
 	g_return_if_fail (cancellable == NULL || G_IS_CANCELLABLE (cancellable));
 	g_return_if_fail (callback != NULL);
 
-	/* Ensure we're authenticated first */
 	if (gdata_authorizer_is_authorized_for_domain (gdata_service_get_authorizer (GDATA_SERVICE (self)),
 	                                               get_documents_authorization_domain ()) == FALSE) {
 		g_autoptr(GTask) task = NULL;
@@ -676,23 +304,6 @@ gdata_documents_service_query_documents_async (GDataDocumentsService *self, GDat
 	g_free (request_uri);
 }
 
-/**
- * gdata_documents_service_query_drives:
- * @self: a #GDataDocumentsService
- * @query: (nullable): a #GDataDocumentsDriveQuery with the query parameters, or %NULL
- * @cancellable: (nullable): optional #GCancellable object, or %NULL
- * @progress_callback: (nullable) (scope call) (closure progress_user_data): a #GDataQueryProgressCallback to call when an entry is loaded, or %NULL
- * @progress_user_data: (closure): data to pass to the @progress_callback function
- * @error: a #GError, or %NULL
- *
- * Queries the service to return a list of shared drives matching the given @query.
- *
- * For more details, see gdata_service_query().
- *
- * Return value: (transfer full): a #GDataDocumentsFeed of query results; unref with g_object_unref()
- *
- * Since: 0.18.0
- */
 GDataDocumentsFeed *
 gdata_documents_service_query_drives (GDataDocumentsService *self, GDataDocumentsDriveQuery *query, GCancellable *cancellable,
                                       GDataQueryProgressCallback progress_callback, gpointer progress_user_data,
@@ -706,7 +317,6 @@ gdata_documents_service_query_drives (GDataDocumentsService *self, GDataDocument
 	g_return_val_if_fail (cancellable == NULL || G_IS_CANCELLABLE (cancellable), NULL);
 	g_return_val_if_fail (error == NULL || *error == NULL, NULL);
 
-	/* Ensure we're authenticated first */
 	if (gdata_authorizer_is_authorized_for_domain (gdata_service_get_authorizer (GDATA_SERVICE (self)),
 	                                               get_documents_authorization_domain ()) == FALSE) {
 		g_set_error_literal (error, GDATA_SERVICE_ERROR, GDATA_SERVICE_ERROR_AUTHENTICATION_REQUIRED,
@@ -720,26 +330,6 @@ gdata_documents_service_query_drives (GDataDocumentsService *self, GDataDocument
 	return GDATA_DOCUMENTS_FEED (feed);
 }
 
-/**
- * gdata_documents_service_query_drives_async: (finish-func gdata_service_query_finish):
- * @self: a #GDataDocumentsService
- * @query: (nullable): a #GDataDocumentsDriveQuery with the query parameters, or %NULL
- * @cancellable: (nullable): optional #GCancellable object, or %NULL
- * @progress_callback: (nullable) (closure progress_user_data): a #GDataQueryProgressCallback to call when an entry is loaded, or %NULL
- * @progress_user_data: (closure): data to pass to the @progress_callback function
- * @destroy_progress_user_data: (nullable): the function to call when @progress_callback will not be called any more, or %NULL. This function will be
- * called with @progress_user_data as a parameter and can be used to free any memory allocated for it.
- * @callback: a #GAsyncReadyCallback to call when authentication is finished
- * @user_data: (closure): data to pass to the @callback function
- *
- * Queries the service to return a list of shared drives matching the given @query. @self and
- * @query are both reffed when this function is called, so can safely be unreffed after this function returns.
- *
- * For more details, see gdata_documents_service_query_drives(), which is the synchronous version of this function,
- * and gdata_service_query_async(), which is the base asynchronous query function.
- *
- * Since: 0.18.0
- */
 void
 gdata_documents_service_query_drives_async (GDataDocumentsService *self, GDataDocumentsDriveQuery *query, GCancellable *cancellable,
                                             GDataQueryProgressCallback progress_callback, gpointer progress_user_data,
@@ -753,7 +343,6 @@ gdata_documents_service_query_drives_async (GDataDocumentsService *self, GDataDo
 	g_return_if_fail (cancellable == NULL || G_IS_CANCELLABLE (cancellable));
 	g_return_if_fail (callback != NULL);
 
-	/* Ensure we're authenticated first */
 	if (gdata_authorizer_is_authorized_for_domain (gdata_service_get_authorizer (GDATA_SERVICE (self)),
 	                                               get_documents_authorization_domain ()) == FALSE) {
 		g_autoptr(GTask) task = NULL;
@@ -778,7 +367,6 @@ add_folder_link_to_entry (GDataDocumentsEntry *entry, GDataDocumentsFolder *fold
 	const gchar *id;
 	gchar *uri;
 
-	/* HACK: Build the GDataLink:uri from the ID by adding the prefix. */
 	id = gdata_entry_get_id (GDATA_ENTRY (folder));
 	uri = g_strconcat (GDATA_DOCUMENTS_URI_PREFIX, id, NULL);
 	_link = gdata_link_new (uri, GDATA_LINK_PARENT);
@@ -795,13 +383,10 @@ upload_update_document (GDataDocumentsService *self, GDataDocumentsDocument *doc
 	if (folder != NULL)
 		add_folder_link_to_entry (GDATA_DOCUMENTS_ENTRY (document), folder);
 
-	/* We need streaming file I/O: GDataUploadStream */
 	if (content_length == -1) {
-		/* Non-resumable upload. */
 		return GDATA_UPLOAD_STREAM (gdata_upload_stream_new (GDATA_SERVICE (self), get_documents_authorization_domain (), method, upload_uri,
 	                                                             GDATA_ENTRY (document), slug, content_type, cancellable));
 	} else {
-		/* Resumable upload. */
 		return GDATA_UPLOAD_STREAM (gdata_upload_stream_new_resumable (GDATA_SERVICE (self), get_documents_authorization_domain (), method,
 		                                                               upload_uri, GDATA_ENTRY (document), slug, content_type, content_length,
 		                                                               cancellable));
@@ -827,40 +412,6 @@ _upload_checks (GDataDocumentsService *self, GDataDocumentsDocument *document, G
 	return TRUE;
 }
 
-/**
- * gdata_documents_service_upload_document:
- * @self: an authenticated #GDataDocumentsService
- * @document: (allow-none): the #GDataDocumentsDocument to insert, or %NULL
- * @slug: the filename to give to the uploaded document
- * @content_type: the content type of the uploaded data
- * @folder: (allow-none): the folder to which the document should be uploaded, or %NULL
- * @cancellable: (allow-none): a #GCancellable for the entire upload stream, or %NULL
- * @error: a #GError, or %NULL
- *
- * Uploads a document to Google Documents, using the properties from @document and the document data written to the resulting #GDataUploadStream. If
- * the document data does not need to be provided at the moment, just the metadata, use gdata_service_insert_entry() instead (e.g. in the case of
- * creating a new, empty file to be edited at a later date).
- *
- * This performs a non-resumable upload, unlike gdata_documents_service_upload_document(). This means that errors during transmission will cause the
- * upload to fail, and the entire document will have to be re-uploaded. It is recommended that gdata_documents_service_upload_document_resumable()
- * be used instead.
- *
- * If @document is %NULL, only the document data will be uploaded. The new document entry will be named using @slug, and will have default metadata.
- *
- * The stream returned by this function should be written to using the standard #GOutputStream methods, asynchronously or synchronously. Once the stream
- * is closed (using g_output_stream_close()), gdata_documents_service_finish_upload() should be called on it to parse and return the updated
- * #GDataDocumentsDocument for the document. This must be done, as @document isn't updated in-place.
- *
- * In order to cancel the upload, a #GCancellable passed in to @cancellable must be cancelled using g_cancellable_cancel(). Cancelling the individual
- * #GOutputStream operations on the #GDataUploadStream will not cancel the entire upload; merely the write or close operation in question. See the
- * #GDataUploadStream:cancellable for more details.
- *
- * Any upload errors will be thrown by the stream methods, and may come from the #GDataServiceError domain.
- *
- * Return value: (transfer full): a #GDataUploadStream to write the document data to, or %NULL; unref with g_object_unref()
- *
- * Since: 0.8.0
- */
 GDataUploadStream *
 gdata_documents_service_upload_document (GDataDocumentsService *self, GDataDocumentsDocument *document, const gchar *slug, const gchar *content_type,
                                          GDataDocumentsFolder *folder, GCancellable *cancellable, GError **error)
@@ -890,48 +441,6 @@ gdata_documents_service_upload_document (GDataDocumentsService *self, GDataDocum
 	return upload_stream;
 }
 
-/**
- * gdata_documents_service_upload_document_resumable:
- * @self: an authenticated #GDataDocumentsService
- * @document: (allow-none): the #GDataDocumentsDocument to insert, or %NULL
- * @slug: the filename to give to the uploaded document
- * @content_type: the content type of the uploaded data
- * @content_length: the size (in bytes) of the file being uploaded
- * @query: (allow-none): a query specifying parameters for the upload, or %NULL
- * @cancellable: (allow-none): a #GCancellable for the entire upload stream, or %NULL
- * @error: a #GError, or %NULL
- *
- * Uploads a document to Google Documents, using the properties from @document and the document data written to the resulting #GDataUploadStream. If
- * the document data does not need to be provided at the moment, just the metadata, use gdata_service_insert_entry() instead (e.g. in the case of
- * creating a new, empty file to be edited at a later date).
- *
- * Unlike gdata_documents_service_upload_document(), this method performs a
- * <ulink type="http" url="http://code.google.com/apis/gdata/docs/resumable_upload.html">resumable upload</ulink> which allows for correction of
- * transmission errors without re-uploading the entire file. Use of this method is preferred over gdata_documents_service_upload_document().
- *
- * If @document is %NULL, only the document data will be uploaded. The new document entry will be named using @slug, and will have default metadata.
- *
- * If non-%NULL, the @query specifies parameters for the upload, such as a #GDataDocumentsFolder to upload the document into; and whether to treat
- * the document as an opaque file, or convert it to a standard format. If @query is %NULL, the document will be uploaded into the root folder, and
- * automatically converted to a standard format. No OCR or automatic language translation will be performed by default.
- *
- * If @query is non-%NULL and #GDataDocumentsUploadQuery:convert is %FALSE, @document must be an instance of #GDataDocumentsDocument. Otherwise,
- * @document must be a subclass of it, such as #GDataDocumentsPresentation.
- *
- * The stream returned by this function should be written to using the standard #GOutputStream methods, asynchronously or synchronously. Once the stream
- * is closed (using g_output_stream_close()), gdata_documents_service_finish_upload() should be called on it to parse and return the updated
- * #GDataDocumentsDocument for the document. This must be done, as @document isn't updated in-place.
- *
- * In order to cancel the upload, a #GCancellable passed in to @cancellable must be cancelled using g_cancellable_cancel(). Cancelling the individual
- * #GOutputStream operations on the #GDataUploadStream will not cancel the entire upload; merely the write or close operation in question. See the
- * #GDataUploadStream:cancellable for more details.
- *
- * Any upload errors will be thrown by the stream methods, and may come from the #GDataServiceError domain.
- *
- * Return value: (transfer full): a #GDataUploadStream to write the document data to, or %NULL; unref with g_object_unref()
- *
- * Since: 0.13.0
- */
 GDataUploadStream *
 gdata_documents_service_upload_document_resumable (GDataDocumentsService *self, GDataDocumentsDocument *document, const gchar *slug,
                                                    const gchar *content_type, goffset content_length, GDataDocumentsUploadQuery *query,
@@ -972,38 +481,6 @@ _update_checks (GDataDocumentsService *self, GError **error)
 	return TRUE;
 }
 
-/**
- * gdata_documents_service_update_document:
- * @self: a #GDataDocumentsService
- * @document: the #GDataDocumentsDocument to update
- * @slug: the filename to give to the uploaded document
- * @content_type: the content type of the uploaded data
- * @cancellable: (allow-none): a #GCancellable for the entire upload stream, or %NULL
- * @error: a #GError, or %NULL
- *
- * Update the document using the properties from @document and the document data written to the resulting #GDataUploadStream. If the document data does
- * not need to be changed, just the metadata, use gdata_service_update_entry() instead.
- *
- * This performs a non-resumable upload, unlike gdata_documents_service_update_document(). This means that errors during transmission will cause the
- * upload to fail, and the entire document will have to be re-uploaded. It is recommended that gdata_documents_service_update_document_resumable()
- * be used instead.
- *
- * The stream returned by this function should be written to using the standard #GOutputStream methods, asynchronously or synchronously. Once the stream
- * is closed (using g_output_stream_close()), gdata_documents_service_finish_upload() should be called on it to parse and return the updated
- * #GDataDocumentsDocument for the document. This must be done, as @document isn't updated in-place.
- *
- * In order to cancel the update, a #GCancellable passed in to @cancellable must be cancelled using g_cancellable_cancel(). Cancelling the individual
- * #GOutputStream operations on the #GDataUploadStream will not cancel the entire update; merely the write or close operation in question. See the
- * #GDataUploadStream:cancellable for more details.
- *
- * Any upload errors will be thrown by the stream methods, and may come from the #GDataServiceError domain.
- *
- * For more information, see gdata_service_update_entry().
- *
- * Return value: (transfer full): a #GDataUploadStream to write the document data to; unref with g_object_unref()
- *
- * Since: 0.8.0
- */
 GDataUploadStream *
 gdata_documents_service_update_document (GDataDocumentsService *self, GDataDocumentsDocument *document, const gchar *slug, const gchar *content_type,
                                          GCancellable *cancellable, GError **error)
@@ -1034,39 +511,6 @@ gdata_documents_service_update_document (GDataDocumentsService *self, GDataDocum
 	return update_stream;
 }
 
-/**
- * gdata_documents_service_update_document_resumable:
- * @self: a #GDataDocumentsService
- * @document: the #GDataDocumentsDocument to update
- * @slug: the filename to give to the uploaded document
- * @content_type: the content type of the uploaded data
- * @content_length: the size (in bytes) of the file being uploaded
- * @cancellable: (allow-none): a #GCancellable for the entire upload stream, or %NULL
- * @error: a #GError, or %NULL
- *
- * Update the document using the properties from @document and the document data written to the resulting #GDataUploadStream. If the document data does
- * not need to be changed, just the metadata, use gdata_service_update_entry() instead.
- *
- * Unlike gdata_documents_service_update_document(), this method performs a
- * <ulink type="http" url="http://code.google.com/apis/gdata/docs/resumable_upload.html">resumable upload</ulink> which allows for correction of
- * transmission errors without re-uploading the entire file. Use of this method is preferred over gdata_documents_service_update_document().
- *
- * The stream returned by this function should be written to using the standard #GOutputStream methods, asynchronously or synchronously. Once the stream
- * is closed (using g_output_stream_close()), gdata_documents_service_finish_upload() should be called on it to parse and return the updated
- * #GDataDocumentsDocument for the document. This must be done, as @document isn't updated in-place.
- *
- * In order to cancel the update, a #GCancellable passed in to @cancellable must be cancelled using g_cancellable_cancel(). Cancelling the individual
- * #GOutputStream operations on the #GDataUploadStream will not cancel the entire update; merely the write or close operation in question. See the
- * #GDataUploadStream:cancellable for more details.
- *
- * Any upload errors will be thrown by the stream methods, and may come from the #GDataServiceError domain.
- *
- * For more information, see gdata_service_update_entry().
- *
- * Return value: (transfer full): a #GDataUploadStream to write the document data to; unref with g_object_unref()
- *
- * Since: 0.13.0
- */
 GDataUploadStream *
 gdata_documents_service_update_document_resumable (GDataDocumentsService *self, GDataDocumentsDocument *document, const gchar *slug,
                                                    const gchar *content_type, goffset content_length, GCancellable *cancellable, GError **error)
@@ -1091,27 +535,6 @@ gdata_documents_service_update_document_resumable (GDataDocumentsService *self, 
 	                               cancellable);
 }
 
-/**
- * gdata_documents_service_finish_upload:
- * @self: a #GDataDocumentsService
- * @upload_stream: the #GDataUploadStream from the operation
- * @error: a #GError, or %NULL
- *
- * Finish off a document upload or update operation started by gdata_documents_service_upload_document() or gdata_documents_service_update_document(),
- * parsing the result and returning the new or updated #GDataDocumentsDocument.
- *
- * If an error occurred during the upload or update operation, it will have been returned during the operation (e.g. by g_output_stream_splice() or one
- * of the other stream methods). In such a case, %NULL will be returned but @error will remain unset. @error is only set in the case that the server
- * indicates that the operation was successful, but an error is encountered in parsing the result sent by the server.
- *
- * In the case that no #GDataDocumentsDocument was passed (to gdata_documents_service_upload_document() or gdata_documents_service_update_document())
- * when starting the operation, %GDATA_DOCUMENTS_SERVICE_ERROR_INVALID_CONTENT_TYPE will be thrown in @error if the content type of the uploaded data
- * could not be mapped to a document type with which to interpret the response from the server.
- *
- * Return value: (transfer full): the new or updated #GDataDocumentsDocument, or %NULL; unref with g_object_unref()
- *
- * Since: 0.8.0
- */
 GDataDocumentsDocument *
 gdata_documents_service_finish_upload (GDataDocumentsService *self, GDataUploadStream *upload_stream, GError **error)
 {
@@ -1120,10 +543,8 @@ gdata_documents_service_finish_upload (GDataDocumentsService *self, GDataUploadS
 	gssize response_length;
 	GType new_document_type = G_TYPE_INVALID;
 
-	/* Get and parse the response from the server */
 	response_body = gdata_upload_stream_get_response (upload_stream, &response_length);
 	if (response_body == NULL || response_length == 0) {
-		/* Error will have been set by the upload stream. */
 		return NULL;
 	}
 
@@ -1140,21 +561,6 @@ gdata_documents_service_finish_upload (GDataDocumentsService *self, GDataUploadS
 	return GDATA_DOCUMENTS_DOCUMENT (gdata_parsable_new_from_json (new_document_type, response_body, (gint) response_length, error));
 }
 
-/**
- * gdata_documents_service_copy_document:
- * @self: an authenticated #GDataDocumentsService
- * @document: the #GDataDocumentsDocument to copy
- * @cancellable: (allow-none): optional #GCancellable object, or %NULL
- * @error: a #GError, or %NULL
- *
- * Copy the given @document, producing a duplicate document in the same folder and returning its #GDataDocumentsDocument.
- *
- * Errors from #GDataServiceError can be returned for exceptional conditions, as determined by the server.
- *
- * Return value: (transfer full): the duplicate #GDataDocumentsDocument, or %NULL; unref with g_object_unref()
- *
- * Since: 0.13.1
- */
 GDataDocumentsDocument *
 gdata_documents_service_copy_document (GDataDocumentsService *self, GDataDocumentsDocument *document, GCancellable *cancellable, GError **error)
 {
@@ -1213,7 +619,6 @@ copy_document_thread (GTask *task, gpointer source_object, gpointer task_data, G
 	g_autoptr(GDataDocumentsDocument) new_document = NULL;
 	g_autoptr(GError) error = NULL;
 
-	/* Copy the document and return */
 	new_document = gdata_documents_service_copy_document (service, document, cancellable, &error);
 	if (error != NULL)
 		g_task_return_error (task, g_steal_pointer (&error));
@@ -1221,24 +626,6 @@ copy_document_thread (GTask *task, gpointer source_object, gpointer task_data, G
 		g_task_return_pointer (task, g_steal_pointer (&new_document), g_object_unref);
 }
 
-/**
- * gdata_documents_service_copy_document_async:
- * @self: a #GDataDocumentsService
- * @document: the #GDataDocumentsDocument to copy
- * @cancellable: (allow-none): optional #GCancellable object, or %NULL
- * @callback: a #GAsyncReadyCallback to call when the operation is finished, or %NULL
- * @user_data: (closure): data to pass to the @callback function
- *
- * Copy the given @document, producing a duplicate document in the same folder and returning its #GDataDocumentsDocument. @self and @document are
- * both reffed when this function is called, so can safely be unreffed after this function returns.
- *
- * For more details, see gdata_documents_service_copy_document(), which is the synchronous version of this function.
- *
- * When the operation is finished, @callback will be called. You can then call gdata_documents_service_copy_document_finish() to get the results
- * of the operation.
- *
- * Since: 0.13.1
- */
 void
 gdata_documents_service_copy_document_async (GDataDocumentsService *self, GDataDocumentsDocument *document, GCancellable *cancellable,
                                              GAsyncReadyCallback callback, gpointer user_data)
@@ -1255,18 +642,6 @@ gdata_documents_service_copy_document_async (GDataDocumentsService *self, GDataD
 	g_task_run_in_thread (task, copy_document_thread);
 }
 
-/**
- * gdata_documents_service_copy_document_finish:
- * @self: a #GDataDocumentsService
- * @async_result: a #GAsyncResult
- * @error: a #GError, or %NULL
- *
- * Finish an asynchronous operation to copy a #GDataDocumentsDocument started with gdata_documents_service_copy_document_async().
- *
- * Return value: (transfer full): the duplicate #GDataDocumentsDocument, or %NULL; unref with g_object_unref()
- *
- * Since: 0.13.1
- */
 GDataDocumentsDocument *
 gdata_documents_service_copy_document_finish (GDataDocumentsService *self, GAsyncResult *async_result, GError **error)
 {
@@ -1279,25 +654,6 @@ gdata_documents_service_copy_document_finish (GDataDocumentsService *self, GAsyn
 	return g_task_propagate_pointer (G_TASK (async_result), error);
 }
 
-/**
- * gdata_documents_service_add_entry_to_folder:
- * @self: an authenticated #GDataDocumentsService
- * @entry: the #GDataDocumentsEntry to copy
- * @folder: the #GDataDocumentsFolder to copy @entry into
- * @cancellable: (allow-none): optional #GCancellable object, or %NULL
- * @error: a #GError, or %NULL
- *
- * Add the given @entry to the specified @folder, and return an updated #GDataDocumentsEntry for @entry. If the @entry is already in another folder,
- * a copy will be added to the new folder. The copy and original will have different IDs. Note that @entry can't be a #GDataDocumentsFolder that
- * already exists on the server. It can be a new #GDataDocumentsFolder, or a #GDataDocumentsDocument that is either new or already present on the
- * server.
- *
- * Errors from #GDataServiceError can be returned for exceptional conditions, as determined by the server.
- *
- * Return value: (transfer full): an updated #GDataDocumentsEntry, or %NULL; unref with g_object_unref()
- *
- * Since: 0.8.0
- */
 GDataDocumentsEntry *
 gdata_documents_service_add_entry_to_folder (GDataDocumentsService *self, GDataDocumentsEntry *entry, GDataDocumentsFolder *folder,
                                              GCancellable *cancellable, GError **error)
@@ -1363,20 +719,16 @@ gdata_documents_service_add_entry_to_folder (GDataDocumentsService *self, GDataD
 	message = _gdata_service_build_message (GDATA_SERVICE (self), get_documents_authorization_domain (), SOUP_METHOD_POST, uri, NULL, FALSE);
 	g_free (uri);
 
-	/* Append the data */
 	upload_data = gdata_parsable_get_json (GDATA_PARSABLE (local_entry));
 	soup_message_set_request_body_from_bytes (message, "application/json", g_bytes_new_take (upload_data, strlen (upload_data)));
 	g_object_unref (local_entry);
 
-	/* Send the message */
 	status = _gdata_service_send_message (GDATA_SERVICE (self), message, cancellable, error);
 
 	if (status == SOUP_STATUS_NONE || status == SOUP_STATUS_CANCELLED) {
-		/* Redirect error or cancelled */
 		g_object_unref (message);
 		return NULL;
 	} else if (status != SOUP_STATUS_OK) {
-		/* Error */
 		GDataServiceClass *klass = GDATA_SERVICE_GET_CLASS (self);
 		GBytes *response_bytes_ptr = NULL;
 		const char *response_data = NULL;
@@ -1396,7 +748,6 @@ gdata_documents_service_add_entry_to_folder (GDataDocumentsService *self, GDataD
 		return NULL;
 	}
 
-	/* Parse the JSON; and update the entry */
 	GBytes *response_bytes_ptr = soup_message_get_response_body_bytes (message);
 	gsize response_length = 0;
 	const void *response_data = NULL;
@@ -1436,7 +787,6 @@ add_entry_to_folder_thread (GTask *task, gpointer source_object, gpointer task_d
 	AddEntryToFolderData *data = task_data;
 	g_autoptr(GError) error = NULL;
 
-	/* Add the entry to the folder and return */
 	updated_entry = gdata_documents_service_add_entry_to_folder (service, data->entry, data->folder, cancellable, &error);
 	if (error != NULL)
 		g_task_return_error (task, g_steal_pointer (&error));
@@ -1444,25 +794,6 @@ add_entry_to_folder_thread (GTask *task, gpointer source_object, gpointer task_d
 		g_task_return_pointer (task, g_steal_pointer (&updated_entry), (GDestroyNotify) g_object_unref);
 }
 
-/**
- * gdata_documents_service_add_entry_to_folder_async:
- * @self: a #GDataDocumentsService
- * @entry: the #GDataDocumentsEntry to add to @folder
- * @folder: the #GDataDocumentsFolder to add @entry to
- * @cancellable: (allow-none): optional #GCancellable object, or %NULL
- * @callback: a #GAsyncReadyCallback to call when the operation is finished, or %NULL
- * @user_data: (closure): data to pass to the @callback function
- *
- * Add the given @entry to the specified @folder. @self, @entry and @folder are all reffed when this function is called, so can safely be unreffed
- * after this function returns.
- *
- * For more details, see gdata_documents_service_add_entry_to_folder(), which is the synchronous version of this function.
- *
- * When the operation is finished, @callback will be called. You can then call gdata_documents_service_add_entry_to_folder_finish() to get the results
- * of the operation.
- *
- * Since: 0.8.0
- */
 void
 gdata_documents_service_add_entry_to_folder_async (GDataDocumentsService *self, GDataDocumentsEntry *entry, GDataDocumentsFolder *folder,
                                                    GCancellable *cancellable, GAsyncReadyCallback callback, gpointer user_data)
@@ -1485,18 +816,6 @@ gdata_documents_service_add_entry_to_folder_async (GDataDocumentsService *self, 
 	g_task_run_in_thread (task, add_entry_to_folder_thread);
 }
 
-/**
- * gdata_documents_service_add_entry_to_folder_finish:
- * @self: a #GDataDocumentsService
- * @async_result: a #GAsyncResult
- * @error: a #GError, or %NULL
- *
- * Finish an asynchronous operation to add a #GDataDocumentsEntry to a folder started with gdata_documents_service_add_entry_to_folder_async().
- *
- * Return value: (transfer full): an updated #GDataDocumentsEntry, or %NULL; unref with g_object_unref()
- *
- * Since: 0.8.0
- */
 GDataDocumentsEntry *
 gdata_documents_service_add_entry_to_folder_finish (GDataDocumentsService *self, GAsyncResult *async_result, GError **error)
 {
@@ -1509,23 +828,6 @@ gdata_documents_service_add_entry_to_folder_finish (GDataDocumentsService *self,
 	return g_task_propagate_pointer (G_TASK (async_result), error);
 }
 
-/**
- * gdata_documents_service_remove_entry_from_folder:
- * @self: a #GDataDocumentsService
- * @entry: the #GDataDocumentsEntry to remove
- * @folder: the #GDataDocumentsFolder from which we should remove @entry
- * @cancellable: (allow-none): optional #GCancellable object, or %NULL
- * @error: a #GError, or %NULL
- *
- * Remove the given @entry from @folder, and return an updated #GDataDocumentsEntry for @entry. @entry will remain a member of any other folders it's
- * currently in. Note that @entry can be either a #GDataDocumentsDocument or a #GDataDocumentsFolder.
- *
- * Errors from #GDataServiceError can be returned for exceptional conditions, as determined by the server.
- *
- * Return value: (transfer full): an updated #GDataDocumentsEntry, or %NULL; unref with g_object_unref()
- *
- * Since: 0.8.0
- */
 GDataDocumentsEntry *
 gdata_documents_service_remove_entry_from_folder (GDataDocumentsService *self, GDataDocumentsEntry *entry, GDataDocumentsFolder *folder,
                                                   GCancellable *cancellable, GError **error)
@@ -1604,15 +906,12 @@ gdata_documents_service_remove_entry_from_folder (GDataDocumentsService *self, G
 	g_free (fixed_uri);
 	g_free (modified_uri);
 
-	/* Send the message */
 	status = _gdata_service_send_message (GDATA_SERVICE (self), message, cancellable, error);
 
 	if (status == SOUP_STATUS_NONE || status == SOUP_STATUS_CANCELLED) {
-		/* Redirect error or cancelled */
 		g_object_unref (message);
 		return NULL;
 	} else if (status != SOUP_STATUS_OK && status != SOUP_STATUS_NO_CONTENT) {
-		/* Error */
 		GDataServiceClass *service_klass = GDATA_SERVICE_GET_CLASS (self);
 		GBytes *response_bytes_ptr = NULL;
 		const char *response_data = NULL;
@@ -1639,7 +938,6 @@ gdata_documents_service_remove_entry_from_folder (GDataDocumentsService *self, G
 	g_object_unref (message);
 
 	if (req_status) {
-		/* Remove parent link from File's Data Entry */
 		gdata_entry_remove_link (GDATA_ENTRY (entry), folder_link);
 		g_object_ref (entry);
 		return entry;
@@ -1669,7 +967,6 @@ remove_entry_from_folder_thread (GTask *task, gpointer source_object, gpointer t
 	RemoveEntryFromFolderData *data = task_data;
 	g_autoptr(GError) error = NULL;
 
-	/* Remove the entry from the folder and return */
 	updated_entry = gdata_documents_service_remove_entry_from_folder (service, data->entry, data->folder, cancellable, &error);
 	if (error != NULL)
 		g_task_return_error (task, g_steal_pointer (&error));
@@ -1677,25 +974,6 @@ remove_entry_from_folder_thread (GTask *task, gpointer source_object, gpointer t
 		g_task_return_pointer (task, g_steal_pointer (&updated_entry), g_object_unref);
 }
 
-/**
- * gdata_documents_service_remove_entry_from_folder_async:
- * @self: a #GDataDocumentsService
- * @entry: the #GDataDocumentsEntry to remove from @folder
- * @folder: the #GDataDocumentsFolder to remove @entry from
- * @cancellable: (allow-none): optional #GCancellable object, or %NULL
- * @callback: a #GAsyncReadyCallback to call when the operation is finished, or %NULL
- * @user_data: (closure): data to pass to the @callback function
- *
- * Remove the given @entry from the specified @folder. @self, @entry and @folder are all reffed when this function is called, so can safely be unreffed
- * after this function returns.
- *
- * For more details, see gdata_documents_service_remove_entry_from_folder(), which is the synchronous version of this function.
- *
- * When the operation is finished, @callback will be called. You can then call gdata_documents_service_remove_entry_from_folder_finish() to get the
- * results of the operation.
- *
- * Since: 0.8.0
- */
 void
 gdata_documents_service_remove_entry_from_folder_async (GDataDocumentsService *self, GDataDocumentsEntry *entry, GDataDocumentsFolder *folder,
                                                         GCancellable *cancellable, GAsyncReadyCallback callback, gpointer user_data)
@@ -1718,19 +996,6 @@ gdata_documents_service_remove_entry_from_folder_async (GDataDocumentsService *s
 	g_task_run_in_thread (task, remove_entry_from_folder_thread);
 }
 
-/**
- * gdata_documents_service_remove_entry_from_folder_finish:
- * @self: a #GDataDocumentsService
- * @async_result: a #GAsyncResult
- * @error: a #GError, or %NULL
- *
- * Finish an asynchronous operation to remove a #GDataDocumentsEntry from a folder started with
- * gdata_documents_service_remove_entry_from_folder_async().
- *
- * Return value: (transfer full): an updated #GDataDocumentsEntry, or %NULL; unref with g_object_unref()
- *
- * Since: 0.8.0
- */
 GDataDocumentsEntry *
 gdata_documents_service_remove_entry_from_folder_finish (GDataDocumentsService *self, GAsyncResult *async_result, GError **error)
 {
@@ -1743,7 +1008,6 @@ gdata_documents_service_remove_entry_from_folder_finish (GDataDocumentsService *
 	return g_task_propagate_pointer (G_TASK (async_result), error);
 }
 
-/* NOTE: query may be NULL. */
 static gchar *
 _get_upload_uri_for_query_and_folder (GDataDocumentsUploadQuery *query, GDataDocumentsFolder *folder)
 {
@@ -1758,23 +1022,10 @@ _get_upload_uri_for_query_and_folder (GDataDocumentsUploadQuery *query, GDataDoc
 	return gdata_documents_upload_query_build_uri (query);
 }
 
-/**
- * gdata_documents_service_get_upload_uri:
- * @folder: (allow-none): the #GDataDocumentsFolder into which to upload the document, or %NULL
- *
- * Gets the upload URI for documents for the service.
- *
- * If @folder is %NULL, the URI will be the one to upload documents to the "root" folder.
- *
- * Return value: the URI permitting the upload of documents to @folder, or %NULL; free with g_free()
- *
- * Since: 0.5.0
- */
 gchar *
 gdata_documents_service_get_upload_uri (GDataDocumentsFolder *folder)
 {
 	g_return_val_if_fail (folder == NULL || GDATA_IS_DOCUMENTS_FOLDER (folder), NULL);
 
-	/* Upload URI: https://developers.google.com/drive/web/manage-uploads */
 	return g_strdup ("https://www.googleapis.com/upload/drive/v2/files");
 }

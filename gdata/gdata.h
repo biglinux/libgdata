@@ -105,16 +105,6 @@
 #include <gdata/services/calendar/gdata-calendar-query.h>
 #include <gdata/services/calendar/gdata-calendar-access-rule.h>
 
-/* Google PicasaWeb */
-#include <gdata/services/picasaweb/gdata-picasaweb-service.h>
-#include <gdata/services/picasaweb/gdata-picasaweb-feed.h>
-#include <gdata/services/picasaweb/gdata-picasaweb-query.h>
-#include <gdata/services/picasaweb/gdata-picasaweb-album.h>
-#include <gdata/services/picasaweb/gdata-picasaweb-file.h>
-#include <gdata/services/picasaweb/gdata-picasaweb-enums.h>
-#include <gdata/services/picasaweb/gdata-picasaweb-user.h>
-#include <gdata/services/picasaweb/gdata-picasaweb-comment.h>
-
 /* Google Documents*/
 #include <gdata/services/documents/gdata-documents-entry.h>
 #include <gdata/services/documents/gdata-documents-document.h>
