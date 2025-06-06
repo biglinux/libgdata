@@ -78,6 +78,8 @@
 #include <glib.h>
 #include <glib/gi18n-lib.h>
 #include <string.h>
+#include <libsoup-3.0/libsoup/soup.h>
+#include <libsoup-3.0/libsoup/soup-message.h>
 
 #include "gdata-calendar-calendar.h"
 #include "gdata-private.h"
@@ -246,14 +248,26 @@ get_rules (GDataAccessHandler *self,
 		return NULL;
 	}
 
-	g_assert (message->response_body->data != NULL);
+	GBytes *response_bytes_ptr = soup_message_get_response_body_bytes (message);
+	gsize response_length = 0;
+	const void *response_data = NULL;
+
+	if (response_bytes_ptr != NULL) {
+		response_data = g_bytes_get_data (response_bytes_ptr, &response_length);
+	}
+
+	g_assert (response_data != NULL);
 
 	feed = _gdata_feed_new_from_json (GDATA_TYPE_FEED,
-	                                  message->response_body->data,
-	                                  message->response_body->length,
+	                                  response_data,
+	                                  response_length,
 	                                  GDATA_TYPE_CALENDAR_ACCESS_RULE,
 	                                  progress_callback, progress_user_data,
 	                                  error);
+
+	if (response_bytes_ptr) {
+		g_bytes_unref (response_bytes_ptr);
+	}
 
 	/* Set the self link on all the ACL rules so they can be deleted.
 	 * Sigh. */

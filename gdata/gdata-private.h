@@ -22,7 +22,7 @@
 
 #include <glib.h>
 #include <libxml/parser.h>
-#include <libsoup/soup.h>
+#include <libsoup-3.0/libsoup/soup.h>
 
 #include <gdata/gdata-service.h>
 

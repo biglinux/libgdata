@@ -130,11 +130,28 @@ enum_headers += custom_target(
 symbol_map = meson.current_source_dir() / 'symbol.map'
 ldflags = cc.get_supported_link_arguments('-Wl,--version-script,' + symbol_map)
 
+# Explicitly get cflags for includes
+libsoup_dep_for_cflags = dependency('libsoup-3.0', version: '>= 3.0.0')
+gio_dep_for_cflags = dependency('gio-2.0', version: '>= 2.44.0')
+
+current_c_args = common_c_args + ['-DG_LOG_DOMAIN="@0@"'.format(gdata_name)]
+# Add include flags, splitting them as they might be a single string
+foreach flag: libsoup_dep_for_cflags.get_pkgconfig_variable('cflags_only_I').split()
+  if flag.strip() != ''
+    current_c_args += flag
+  endif
+endforeach
+foreach flag: gio_dep_for_cflags.get_pkgconfig_variable('cflags_only_I').split()
+  if flag.strip() != ''
+    current_c_args += flag
+  endif
+endforeach
+
 libgdata_lib = shared_library(
   'gdata',
   include_directories: incs,
   sources: sources + enum_headers + marshal_files,
-  c_args: common_c_args + ['-DG_LOG_DOMAIN="@0@"'.format(gdata_name)],
+  c_args: current_c_args,
   dependencies: gdata_deps + gdata_private_deps,
   link_args: ldflags,
   link_depends: symbol_map,
@@ -166,8 +183,8 @@ pkgconfig.generate(
 )
 
 if get_option('introspection')
-  gdata_gir_includes = ['GObject-2.0', 'libxml2-2.0', 'Soup-2.4', 'Json-1.0']
-  gdata_vapi_deps = ['libxml-2.0', 'libsoup-2.4', 'json-glib-1.0']
+  gdata_gir_includes = ['GObject-2.0', 'libxml2-2.0', 'Soup-3.0', 'Json-1.0']
+  gdata_vapi_deps = ['libxml-2.0', 'libsoup-3.0', 'json-glib-1.0']
 
   if enable_goa
     gdata_gir_includes += ['Goa-1.0']

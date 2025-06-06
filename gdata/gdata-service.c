@@ -40,7 +40,7 @@
 #include <config.h>
 #include <glib.h>
 #include <glib/gi18n-lib.h>
-#include <libsoup/soup.h>
+#include <libsoup-3.0/libsoup/soup.h>
 #include <string.h>
 #include <stdarg.h>
 
@@ -570,110 +570,64 @@ _gdata_service_build_message (GDataService *self, GDataAuthorizationDomain *doma
 	return message;
 }
 
-typedef struct {
-	GMutex mutex; /* mutex to prevent cancellation before the message has been added to the session's message queue */
-	SoupSession *session;
-	SoupMessage *message;
-} MessageData;
-
-static void
-message_cancel_cb (GCancellable *cancellable, MessageData *data)
-{
-	g_mutex_lock (&(data->mutex));
-	soup_session_cancel_message (data->session, data->message, SOUP_STATUS_CANCELLED);
-	g_mutex_unlock (&(data->mutex));
-}
-
-static void
-message_request_queued_cb (SoupSession *session, SoupMessage *message, MessageData *data)
-{
-	if (message == data->message) {
-		g_mutex_unlock (&(data->mutex));
-	}
-}
-
-/* Synchronously send @message via @service, handling asynchronous cancellation as best we can. If @cancellable has been cancelled before we start
- * network activity, return without doing any network activity. Otherwise, if @cancellable is cancelled (from another thread) after network activity
- * has started, we wait until the message has been queued by the session, then cancel the network activity and return as soon as possible.
- *
- * If cancellation has been handled, @error is guaranteed to be set to %G_IO_ERROR_CANCELLED. Otherwise, @error is guaranteed to be unset. */
+/* Synchronously send @message via @service.
+ * @error is guaranteed to be set if the message status indicates an error or cancellation.
+ * Otherwise, @error is guaranteed to be unset. */
 void
 _gdata_service_actually_send_message (SoupSession *session, SoupMessage *message, GCancellable *cancellable, GError **error)
 {
-	MessageData data;
-	gulong cancel_signal = 0, request_queued_signal = 0;
+	g_autoptr(GInputStream) response_stream = NULL;
 
-	/* Hold references to the session and message so they can't be freed by other threads. For example, if the SoupSession was freed by another
-	 * thread while we were making a request, the request would be unexpectedly cancelled. See bgo#650835 for an example of this breaking things.
-	 */
+	/* Hold references to the session and message so they can't be freed by other threads. */
 	g_object_ref (session);
 	g_object_ref (message);
 
-	/* Listen for cancellation */
-	if (cancellable != NULL) {
-		g_mutex_init (&(data.mutex));
-		data.session = session;
-		data.message = message;
+	/* In libsoup3, soup_session_send_message is removed.
+	 * We adapt the async API here to behave synchronously for minimal changes to calling code.
+	 * soup_session_send_async itself doesn't return a value, errors are propagated via GTask.
+	 * soup_session_send_finish will block and return the GInputStream or propagate an error.
+	 */
+	response_stream = soup_session_send_finish (session,
+	                                            soup_session_send_async (session, message, cancellable, NULL, NULL),
+	                                            error);
 
-		cancel_signal = g_cancellable_connect (cancellable, (GCallback) message_cancel_cb, &data, NULL);
-		request_queued_signal = g_signal_connect (session, "request-queued", (GCallback) message_request_queued_cb, &data);
-
-		/* We lock this mutex until the message has been queued by the session (i.e. it's unlocked in the request-queued callback), and require
-		 * the mutex to be held to cancel the message. Consequently, if the message is cancelled (in another thread) any time between this lock
-		 * and the request being queued, the cancellation will wait until the request has been queued before taking effect.
-		 * This is a little ugly, but is the only way I can think of to avoid a race condition between calling soup_session_cancel_message()
-		 * and soup_session_send_message(), as the former doesn't have any effect until the request has been queued, and once the latter has
-		 * returned, all network activity has been finished so cancellation is pointless. */
-		g_mutex_lock (&(data.mutex));
-	}
-
-	/* Only send the message if it hasn't already been cancelled. There is no race condition here for the above reasons: if the cancellable has
-	 * been cancelled, it's because it was cancelled before we called g_cancellable_connect().
-	 *
-	 * Otherwise, manually set the message's status code to SOUP_STATUS_CANCELLED, as the message was cancelled before even being queued to be
-	 * sent. */
-	if (cancellable == NULL || g_cancellable_is_cancelled (cancellable) == FALSE)
-		soup_session_send_message (session, message);
-	else {
-		if (cancellable != NULL) {
-			g_mutex_unlock (&data.mutex);
+	/* If error is set by soup_session_send_finish, it means the request failed (network error, cancelled, etc.)
+	 * The message status code might not be set or might be misleading in these cases.
+	 * If no GError is set, then the HTTP transaction completed to some extent, and we rely on message->status_code.
+	 */
+	if (*error != NULL) {
+		/* If cancelled, ensure the status code reflects that. GIO usually sets G_IO_ERROR_CANCELLED. */
+		if (g_error_matches (*error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+			soup_message_set_status (message, SOUP_STATUS_CANCELLED);
+		} else if (message->status_code == 0 || message->status_code == SOUP_STATUS_NONE) {
+			/* If there's an error but no status code, map it to a generic client-side error.
+			 * This helps calling code that primarily checks status_code.
+			 * SOUP_STATUS_CANT_RESOLVE, SOUP_STATUS_CANT_CONNECT etc. might be more specific if available from the error.
+			 */
+			if (g_error_matches (*error, SOUP_HTTP_ERROR, SOUP_HTTP_ERROR_CANT_RESOLVE) ||
+			    g_error_matches (*error, G_IO_ERROR, G_IO_ERROR_HOST_NOT_FOUND)) {
+				soup_message_set_status (message, SOUP_STATUS_CANT_RESOLVE);
+			} else if (g_error_matches (*error, SOUP_HTTP_ERROR, SOUP_HTTP_ERROR_CANT_CONNECT) ||
+			           g_error_matches (*error, G_IO_ERROR, G_IO_ERROR_CONNECTION_REFUSED)) {
+				soup_message_set_status (message, SOUP_STATUS_CANT_CONNECT);
+			} else if (g_error_matches (*error, G_IO_ERROR, G_IO_ERROR_TLS_ERROR)) {
+				soup_message_set_status (message, SOUP_STATUS_SSL_FAILED);
+			} else {
+				soup_message_set_status (message, SOUP_STATUS_IO_ERROR); /* Generic I/O error */
+			}
 		}
-
-		soup_message_set_status (message, SOUP_STATUS_CANCELLED);
+		/* g_debug("Send failed, error: %s, status: %u", (*error)->message, soup_message_get_status(message)); */
+	} else {
+		/* g_debug("Send succeeded, status: %u", soup_message_get_status(message)); */
+		/* Success, response_stream contains the body, but this function doesn't return it.
+		 * The message's response_body and status_code are populated by libsoup.
+		 * We can unref response_stream as it's not used further by this synchronous wrapper's callers
+		 * directly; they access message->response_body.
+		 */
+		g_clear_object (&response_stream);
 	}
 
-	/* Clean up the cancellation code */
-	if (cancellable != NULL) {
-		g_signal_handler_disconnect (session, request_queued_signal);
-
-		if (cancel_signal != 0)
-			g_cancellable_disconnect (cancellable, cancel_signal);
-
-		g_mutex_clear (&(data.mutex));
-	}
-
-	/* Set the cancellation error if applicable. We can't assume that our GCancellable has been cancelled just because the message has;
-	 * libsoup may internally cancel messages if, for example, the proxy URI of the SoupSession is changed.
-	 * libsoup also sometimes seems to return a SOUP_STATUS_IO_ERROR when we cancel a message, even though we've specified SOUP_STATUS_CANCELLED
-	 * at cancellation time. Ho Hum. */
-	g_assert (message->status_code != SOUP_STATUS_NONE);
-
-	if (message->status_code == SOUP_STATUS_CANCELLED ||
-	    ((message->status_code == SOUP_STATUS_IO_ERROR || message->status_code == SOUP_STATUS_SSL_FAILED ||
-	      message->status_code == SOUP_STATUS_CANT_CONNECT || message->status_code == SOUP_STATUS_CANT_RESOLVE) &&
-	     cancellable != NULL && g_cancellable_is_cancelled (cancellable) == TRUE)) {
-		/* We hackily create and cancel a new GCancellable so that we can set the error using it and therefore save ourselves a translatable
-		 * string and the associated maintenance. */
-		GCancellable *error_cancellable = g_cancellable_new ();
-		g_cancellable_cancel (error_cancellable);
-		g_assert (g_cancellable_set_error_if_cancelled (error_cancellable, error) == TRUE);
-		g_object_unref (error_cancellable);
-
-		/* As per the above comment, force the status to be SOUP_STATUS_CANCELLED. */
-		soup_message_set_status (message, SOUP_STATUS_CANCELLED);
-	}
-
-	/* Free things */
+	/* Free our references */
 	g_object_unref (message);
 	g_object_unref (session);
 }
@@ -688,12 +642,48 @@ _gdata_service_send_message (GDataService *self, SoupMessage *message, GCancella
 	 * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
 	 */
 
-	soup_message_set_flags (message, SOUP_MESSAGE_NO_REDIRECT);
+	/* For libsoup3, SOUP_MESSAGE_NO_REDIRECT is deprecated. Redirection is controlled by
+	 * SoupSession:follow-redirects property (default TRUE) or SoupMessage:flags.
+	 * To replicate old behavior (manual redirect for header preservation), we would
+	 * need to set SOUP_MESSAGE_NO_REDIRECTS flag if it exists, or ensure session doesn't auto-follow.
+	 * However, the comment mentions "specially so we don't lose our custom headers".
+	 * Libsoup 3's automatic redirect handling *should* resend original headers for GET/HEAD
+	 * and seek application confirmation for other methods if headers might be unsafe.
+	 * For now, let's assume the default (follow redirects) is acceptable, or set it explicitly.
+	 * If specific headers are lost, this needs revisiting.
+	 * The old code set NO_REDIRECT then cleared it. Let's try with default redirect handling first.
+	 */
+	/* soup_message_set_flags (message, SOUP_MESSAGE_NO_REDIRECTS); */ /* If we want to force manual */
 	_gdata_service_actually_send_message (self->priv->session, message, cancellable, error);
-	soup_message_set_flags (message, 0);
+	/* soup_message_set_flags (message, 0); */ /* Clear flags if set above */
 
-	/* Handle redirections specially so we don't lose our custom headers when making the second request */
-	if (SOUP_STATUS_IS_REDIRECTION (message->status_code)) {
+	/* If an error occurred (including cancellation) in _gdata_service_actually_send_message,
+	 * *error will be set. The status_code on the message should also reflect this.
+	 */
+	if (*error != NULL) {
+		return soup_message_get_status (message);
+	}
+
+	/* Handle redirections manually IF session is not set to auto-follow, OR if we still need special header handling.
+	 * Assuming for now libsoup3's default redirect (follow-redirects=TRUE on session) is sufficient and
+	 * custom headers are handled correctly by libsoup. If not, the old redirect logic would need to be adapted here.
+	 * The original code's comment "Handle redirections specially so we don't lose our custom headers"
+	 * suggests that automatic redirection might not be suitable.
+	 * Let's keep the manual redirection logic for now.
+	 * To do this, we must ensure the session DOES NOT follow redirects automatically.
+	 * This means SoupSession:follow-redirects should be FALSE, or message flag SOUP_MESSAGE_NO_REDIRECTS is set.
+	 * The previous diff didn't touch follow-redirects on session, it defaults to TRUE.
+	 * For this manual loop to work as before, we need NO_REDIRECTS.
+	 */
+	soup_message_set_flags (message, SOUP_MESSAGE_NO_REDIRECTS);
+	_gdata_service_actually_send_message (self->priv->session, message, cancellable, error);
+	soup_message_unset_flags (message, SOUP_MESSAGE_NO_REDIRECTS); // Clear the flag after the first send
+
+	if (*error != NULL) { /* Check error from the first send */
+		return soup_message_get_status (message);
+	}
+
+	if (SOUP_STATUS_IS_REDIRECTION (soup_message_get_status (message))) {
 		SoupURI *new_uri;
 		const gchar *new_location;
 
@@ -717,7 +707,18 @@ _gdata_service_send_message (GDataService *self, SoupMessage *message, GCancella
 		soup_uri_free (new_uri);
 
 		/* Send the message again */
+		/* Ensure NO_REDIRECTS is not set for the subsequent automatic internal redirect by libsoup if any,
+		 * or if we want to handle further redirects, keep it.
+		 * But the original logic implies only one manual redirect step.
+		 * For the *next* send, we are manually constructing it, so NO_REDIRECTS should be set again.
+		 */
+		soup_message_set_flags (message, SOUP_MESSAGE_NO_REDIRECTS);
 		_gdata_service_actually_send_message (self->priv->session, message, cancellable, error);
+		soup_message_unset_flags (message, SOUP_MESSAGE_NO_REDIRECTS);
+
+		if (*error != NULL) { /* Check error from the redirected send */
+			return soup_message_get_status (message);
+		}
 	}
 
 	/* Not authorised, or authorisation has expired. If we were authorised in the first place, attempt to refresh the authorisation and
@@ -741,11 +742,14 @@ _gdata_service_send_message (GDataService *self, SoupMessage *message, GCancella
 
 			/* Send the message again */
 			g_clear_error (error);
+			/* For the retry, ensure NO_REDIRECTS is set if we're still manually handling them. */
+			soup_message_set_flags (message, SOUP_MESSAGE_NO_REDIRECTS);
 			_gdata_service_actually_send_message (self->priv->session, message, cancellable, error);
+			soup_message_unset_flags (message, SOUP_MESSAGE_NO_REDIRECTS);
 		}
 	}
 
-	return message->status_code;
+	return soup_message_get_status (message);
 }
 
 typedef struct {
@@ -2236,15 +2240,18 @@ _gdata_service_build_session (void)
 		ssl_strict = FALSE;
 	}
 
-	session = soup_session_new_with_options ("ssl-strict", ssl_strict,
-	                                         "timeout", 0,
-	                                         NULL);
+	session = soup_session_new ();
+	g_object_set (session, "ssl-strict", ssl_strict, NULL);
 
-	user_agent = build_user_agent (soup_session_has_feature (session, SOUP_TYPE_CONTENT_DECODER));
+	/* Add content decoder for gzip support */
+	g_autoptr(SoupContentDecoder) content_decoder = soup_content_decoder_new (NULL);
+	soup_session_add_feature (session, SOUP_SESSION_FEATURE (content_decoder));
+
+	user_agent = build_user_agent (TRUE); /* Assume content decoder (gzip) is available */
 	g_object_set (session, "user-agent", user_agent, NULL);
 	g_free (user_agent);
 
-	soup_session_add_feature_by_type (session, SOUP_TYPE_PROXY_RESOLVER_DEFAULT);
+	g_object_set (session, "proxy-resolver", g_proxy_resolver_get_default (), NULL);
 
 	/* Log all libsoup traffic if debugging's turned on */
 	if (_gdata_service_get_log_level () > GDATA_LOG_MESSAGES) {

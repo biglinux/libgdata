@@ -92,11 +92,8 @@ gdata_private_deps = [
   dependency('gthread-2.0'),
 ]
 
-libsoup_dep = dependency('libsoup-2.4', version: '>= 2.42.0')
+libsoup_dep = dependency('libsoup-3.0', version: '>= 3.0.0')
 gdata_deps += libsoup_dep
-# libsoup 2.47.3 is needed for the new SoupServer API; but it contained a bug in
-# soup_server_set_ssl_cert_file() which was only fixed in 2.55.90.
-config_h.set('HAVE_LIBSOUP_2_55_90', libsoup_dep.version().version_compare('>= 2.55.90'))
 
 # Check for gtk
 gtk_dep_req_version = '>= 2.91.2'
@@ -130,7 +127,7 @@ always_build_tests = get_option('always_build_tests')
 install_tests = get_option('installed_tests')
 
 if always_build_tests
-  libuhttpmock_dep = dependency('libuhttpmock-0.0', version: '>= 0.5.0')
+  libuhttpmock_dep = dependency('libuhttpmock-1.0', version: '>= 0.5.0')
 
   gdk_pixbuf_dep = dependency('gdk-pixbuf-2.0', version: '>= 2.14')
   config_h.set('HAVE_GDK_PIXBUF', gdk_pixbuf_dep.found())

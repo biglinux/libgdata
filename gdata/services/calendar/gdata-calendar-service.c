@@ -137,7 +137,7 @@
 #include <config.h>
 #include <glib.h>
 #include <glib/gi18n-lib.h>
-#include <libsoup/soup.h>
+#include <libsoup-3.0/libsoup/soup.h>
 #include <string.h>
 
 #include "gdata-calendar-service.h"

@@ -255,8 +255,15 @@
 #include <config.h>
 #include <glib.h>
 #include <glib/gi18n-lib.h>
-#include <libsoup/soup.h>
+#include <libsoup-3.0/libsoup/soup.h>
 #include <string.h>
+/* Ensure GUri is available if not pulled in by soup.h or glib.h already for GUri */
+#include <glib/guri.h>
+
+/* Add direct include in case of ordering issues via other headers */
+#include <libsoup-3.0/libsoup/soup.h>
+#include <libsoup-3.0/libsoup/soup-status.h>
+#include <libsoup-3.0/libsoup/soup-message.h>
 
 #include "gdata-documents-property.h"
 #include "gdata-documents-service.h"
@@ -305,38 +312,42 @@ append_query_headers (GDataService *self, GDataAuthorizationDomain *domain, Soup
 {
 	g_assert (message != NULL);
 
-	if (message->method == SOUP_METHOD_POST && soup_message_headers_get_one (message->request_headers, "X-Upload-Content-Length") == NULL) {
-		gchar *upload_uri;
+	if (soup_message_get_method (message) == SOUP_METHOD_POST && soup_message_headers_get_one (soup_message_get_request_headers (message), "X-Upload-Content-Length") == NULL) {
+		g_autofree gchar *upload_uri_str = NULL;
 		const gchar *v3_pos;
+		GUri *message_guri;
 
-		upload_uri = soup_uri_to_string (soup_message_get_uri (message), FALSE);
-		v3_pos = strstr (upload_uri, "://docs.google.com/feeds/upload/create-session/default/private/full");
+		message_guri = soup_message_get_uri (message);
+		upload_uri_str = g_uri_to_string (message_guri);
+		v3_pos = strstr (upload_uri_str, "://docs.google.com/feeds/upload/create-session/default/private/full");
 
 		if (v3_pos != NULL) {
-			gchar *v2_upload_uri;
-			SoupURI *_v2_upload_uri;
+			g_autofree gchar *v2_upload_uri_str = NULL;
+			g_autoptr(GUri) v2_guri = NULL;
+			SoupMessageHeaders *request_headers = soup_message_get_request_headers (message);
 
 			/* Content length header for resumable uploads. Only set it if this looks like the initial request of a resumable upload, and
 			 * if no content length has been set previously.
 			 * This allows methods like gdata_service_insert_entry() (which aren't resumable-upload-aware) to continue working for creating
 			 * documents with metadata only, by simulating the initial request of a resumable upload as described here:
 			 * https://developers.google.com/google-apps/documents-list/#creating_a_new_document_or_file_with_metadata_only */
-			soup_message_headers_replace (message->request_headers, "X-Upload-Content-Length", "0");
+			soup_message_headers_replace (request_headers, "X-Upload-Content-Length", "0");
 
 			/* Also set the encoding to be content length encoding. */
-			soup_message_headers_set_encoding (message->request_headers, SOUP_ENCODING_CONTENT_LENGTH);
+			soup_message_headers_set_encoding (request_headers, SOUP_ENCODING_CONTENT_LENGTH);
 
 			/* HACK: Work around http://code.google.com/a/google.com/p/apps-api-issues/issues/detail?id=3033 by changing the upload URI
 			 * to the v2 API's upload URI. Grrr. */
-			v2_upload_uri = g_strconcat (_gdata_service_get_scheme (), "://docs.google.com/feeds/default/private/full",
-			                             v3_pos + strlen ("://docs.google.com/feeds/upload/create-session/default/private/full"), NULL);
-			_v2_upload_uri = soup_uri_new (v2_upload_uri);
-			soup_message_set_uri (message, _v2_upload_uri);
-			soup_uri_free (_v2_upload_uri);
-			g_free (v2_upload_uri);
+			v2_upload_uri_str = g_strconcat (_gdata_service_get_scheme (), "://docs.google.com/feeds/default/private/full",
+			                                 v3_pos + strlen ("://docs.google.com/feeds/upload/create-session/default/private/full"), NULL);
+			v2_guri = g_uri_parse (v2_upload_uri_str, G_URI_FLAGS_NONE, NULL);
+			if (v2_guri) {
+				soup_message_set_uri (message, v2_guri);
+			}
+			/* g_uri_unref is handled by g_autoptr */
+			/* g_free is handled by g_autofree */
 		}
-
-		g_free (upload_uri);
+		/* g_free is handled by g_autofree */
 	}
 
 	/* Chain up to the parent class */
@@ -450,17 +461,38 @@ gdata_documents_service_get_metadata (GDataDocumentsService *self, GCancellable 
 	} else if (status != SOUP_STATUS_OK) {
 		/* Error */
 		GDataServiceClass *klass = GDATA_SERVICE_GET_CLASS (self);
+		GBytes *response_bytes_ptr = NULL;
+		const char *response_data = NULL;
+		gsize response_length = 0;
+
 		g_assert (klass->parse_error_response != NULL);
-		klass->parse_error_response (GDATA_SERVICE (self), GDATA_OPERATION_QUERY, status, message->reason_phrase, message->response_body->data,
-					     message->response_body->length, error);
+		response_bytes_ptr = soup_message_get_response_body_bytes (message);
+		if (response_bytes_ptr) {
+			response_data = g_bytes_get_data (response_bytes_ptr, &response_length);
+		}
+		klass->parse_error_response (GDATA_SERVICE (self), GDATA_OPERATION_QUERY, status, soup_message_get_reason_phrase (message), response_data,
+					     response_length, error);
+		if (response_bytes_ptr) {
+			g_bytes_unref (response_bytes_ptr);
+		}
 		g_object_unref (message);
 		return NULL;
 	}
 
 	/* Parse the JSON; and update the entry */
-	g_assert (message->response_body->data != NULL);
-	metadata = GDATA_DOCUMENTS_METADATA (gdata_parsable_new_from_json (GDATA_TYPE_DOCUMENTS_METADATA, message->response_body->data, message->response_body->length,
+	GBytes *response_bytes_ptr = soup_message_get_response_body_bytes (message);
+	gsize response_length = 0;
+	const void *response_data = NULL;
+
+	if (response_bytes_ptr) {
+		response_data = g_bytes_get_data (response_bytes_ptr, &response_length);
+	}
+	g_assert (response_data != NULL);
+	metadata = GDATA_DOCUMENTS_METADATA (gdata_parsable_new_from_json (GDATA_TYPE_DOCUMENTS_METADATA, response_data, response_length,
 	                                                                    error));
+	if (response_bytes_ptr) {
+		g_bytes_unref (response_bytes_ptr);
+	}
 	g_object_unref (message);
 
 	return metadata;
@@ -1333,7 +1365,7 @@ gdata_documents_service_add_entry_to_folder (GDataDocumentsService *self, GDataD
 
 	/* Append the data */
 	upload_data = gdata_parsable_get_json (GDATA_PARSABLE (local_entry));
-	soup_message_set_request (message, "application/json", SOUP_MEMORY_TAKE, upload_data, strlen (upload_data));
+	soup_message_set_request_body_from_bytes (message, "application/json", g_bytes_new_take (upload_data, strlen (upload_data)));
 	g_object_unref (local_entry);
 
 	/* Send the message */
@@ -1346,17 +1378,38 @@ gdata_documents_service_add_entry_to_folder (GDataDocumentsService *self, GDataD
 	} else if (status != SOUP_STATUS_OK) {
 		/* Error */
 		GDataServiceClass *klass = GDATA_SERVICE_GET_CLASS (self);
+		GBytes *response_bytes_ptr = NULL;
+		const char *response_data = NULL;
+		gsize response_length = 0;
+
 		g_assert (klass->parse_error_response != NULL);
-		klass->parse_error_response (GDATA_SERVICE (self), operation_type, status, message->reason_phrase, message->response_body->data,
-					     message->response_body->length, error);
+		response_bytes_ptr = soup_message_get_response_body_bytes (message);
+		if (response_bytes_ptr) {
+			response_data = g_bytes_get_data (response_bytes_ptr, &response_length);
+		}
+		klass->parse_error_response (GDATA_SERVICE (self), operation_type, status, soup_message_get_reason_phrase (message), response_data,
+					     response_length, error);
+		if (response_bytes_ptr) {
+			g_bytes_unref (response_bytes_ptr);
+		}
 		g_object_unref (message);
 		return NULL;
 	}
 
 	/* Parse the JSON; and update the entry */
-	g_assert (message->response_body->data != NULL);
-	new_entry = GDATA_DOCUMENTS_ENTRY (gdata_parsable_new_from_json (entry_type, message->response_body->data, message->response_body->length,
+	GBytes *response_bytes_ptr = soup_message_get_response_body_bytes (message);
+	gsize response_length = 0;
+	const void *response_data = NULL;
+
+	if (response_bytes_ptr) {
+		response_data = g_bytes_get_data (response_bytes_ptr, &response_length);
+	}
+	g_assert (response_data != NULL);
+	new_entry = GDATA_DOCUMENTS_ENTRY (gdata_parsable_new_from_json (entry_type, response_data, response_length,
 									 error));
+	if (response_bytes_ptr) {
+		g_bytes_unref (response_bytes_ptr);
+	}
 	g_object_unref (message);
 
 	return new_entry;
@@ -1561,14 +1614,25 @@ gdata_documents_service_remove_entry_from_folder (GDataDocumentsService *self, G
 	} else if (status != SOUP_STATUS_OK && status != SOUP_STATUS_NO_CONTENT) {
 		/* Error */
 		GDataServiceClass *service_klass = GDATA_SERVICE_GET_CLASS (self);
+		GBytes *response_bytes_ptr = NULL;
+		const char *response_data = NULL;
+		gsize response_length = 0;
+
 		g_assert (service_klass->parse_error_response != NULL);
+		response_bytes_ptr = soup_message_get_response_body_bytes (message);
+		if (response_bytes_ptr) {
+			response_data = g_bytes_get_data (response_bytes_ptr, &response_length);
+		}
 		service_klass->parse_error_response (GDATA_SERVICE (self),
 						     GDATA_OPERATION_DELETION,
 						     status,
-						     message->reason_phrase,
-						     message->response_body->data,
-						     message->response_body->length,
+						     soup_message_get_reason_phrase (message),
+						     response_data,
+						     response_length,
 						     error);
+		if (response_bytes_ptr) {
+			g_bytes_unref (response_bytes_ptr);
+		}
 		req_status = FALSE;
 	}
 

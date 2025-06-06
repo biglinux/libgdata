@@ -23,7 +23,7 @@
 #include <glib.h>
 #include <glib-object.h>
 #include <gio/gio.h>
-#include <libsoup/soup.h>
+#include <libsoup-3.0/libsoup/soup.h>
 
 #include <gdata/gdata-authorization-domain.h>
 
