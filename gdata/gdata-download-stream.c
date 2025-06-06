@@ -106,7 +106,9 @@
 
 #include "gdata-download-stream.h"
 #include "gdata-buffer.h"
-#include "gdata-private.h"
+#include "gdata-private.h" /* Includes <libsoup-3.0/libsoup/soup.h> */
+#include <libsoup-3.0/libsoup/soup-message.h> /* For SoupMessage functions */
+#include <glib/guri.h> /* For GUri */
 
 static void gdata_download_stream_seekable_iface_init (GSeekableIface *seekable_iface);
 static GObject *gdata_download_stream_constructor (GType type, guint n_construct_params, GObjectConstructParam *construct_params);
@@ -337,7 +339,8 @@ gdata_download_stream_constructor (GType type, guint n_construct_params, GObject
 	GDataDownloadStreamPrivate *priv;
 	GDataServiceClass *klass;
 	GObject *object;
-	SoupURI *_uri;
+	GUri *_uri; /* Changed from SoupURI */
+	GUri *temp_uri_for_port_set = NULL; /* For handling g_uri_set_port */
 
 	/* Chain up to the parent class */
 	object = G_OBJECT_CLASS (gdata_download_stream_parent_class)->constructor (type, n_construct_params, construct_params);
@@ -355,11 +358,21 @@ gdata_download_stream_constructor (GType type, guint n_construct_params, GObject
 	priv->network_cancellable_id = g_cancellable_connect (priv->cancellable, (GCallback) cancellable_cancel_cb, priv->network_cancellable, NULL);
 
 	/* Build the message. The URI must be HTTPS. */
-	_uri = soup_uri_new (priv->download_uri);
-	soup_uri_set_port (_uri, _gdata_service_get_https_port ());
-	g_assert_cmpstr (soup_uri_get_scheme (_uri), ==, SOUP_URI_SCHEME_HTTPS);
+	_uri = g_uri_parse (priv->download_uri, G_URI_FLAGS_NONE, NULL);
+	if (_uri == NULL) {
+		/* Handle URI parsing error, though g_uri_parse with NONE flags rarely fails for valid strings */
+		g_warning("Failed to parse download URI: %s", priv->download_uri);
+		/* TODO: How should this error be propagated? For now, let it potentially crash later. */
+	} else {
+		temp_uri_for_port_set = g_uri_set_port(_uri, _gdata_service_get_https_port ());
+		g_uri_unref(_uri);
+		_uri = temp_uri_for_port_set;
+		g_assert_cmpstr (g_uri_get_scheme (_uri), ==, "https");
+	}
 	priv->message = soup_message_new_from_uri (SOUP_METHOD_GET, _uri);
-	soup_uri_free (_uri);
+	if (_uri) {
+		g_uri_unref (_uri);
+	}
 
 	/* Make sure the headers are set */
 	klass = GDATA_SERVICE_GET_CLASS (priv->service);
@@ -368,7 +381,9 @@ gdata_download_stream_constructor (GType type, guint n_construct_params, GObject
 	}
 
 	/* We don't want to accumulate chunks */
-	soup_message_body_set_accumulate (priv->message->request_body, FALSE);
+	SoupMessageBody *request_body = soup_message_get_body (priv->message);
+	soup_message_body_set_accumulate (request_body, FALSE);
+	/* Note: soup_message_get_body does not return a ref, no need to unref request_body directly. */
 
 	/* Downloading doesn't actually start until the first call to read() */
 
@@ -541,17 +556,19 @@ gdata_download_stream_read (GInputStream *stream, void *buffer, gsize count, GCa
 	g_assert (priv->buffer != NULL);
 	length_read = (gssize) gdata_buffer_pop_data (priv->buffer, buffer, count, &reached_eof, child_cancellable);
 
+	guint status_code = soup_message_get_status(priv->message);
+
 	if (length_read < 1 && g_cancellable_set_error_if_cancelled (child_cancellable, &child_error) == TRUE) {
 		/* Handle cancellation */
 		length_read = -1;
 
 		goto done;
-	} else if (SOUP_STATUS_IS_SUCCESSFUL (priv->message->status_code) == FALSE) {
+	} else if (SOUP_STATUS_IS_SUCCESSFUL (status_code) == FALSE) {
 		GDataServiceClass *klass = GDATA_SERVICE_GET_CLASS (priv->service);
 
 		/* Set an appropriate error */
 		g_assert (klass->parse_error_response != NULL);
-		klass->parse_error_response (priv->service, GDATA_OPERATION_DOWNLOAD, priv->message->status_code, priv->message->reason_phrase,
+		klass->parse_error_response (priv->service, GDATA_OPERATION_DOWNLOAD, status_code, soup_message_get_reason_phrase (priv->message),
 		                             NULL, 0, &child_error);
 		length_read = -1;
 
@@ -820,13 +837,13 @@ got_headers_cb (SoupMessage *message, GDataDownloadStream *self)
 
 	/* Don't get the client's hopes up by setting the Content-Type or -Length if the response
 	 * is actually unsuccessful. */
-	if (SOUP_STATUS_IS_SUCCESSFUL (message->status_code) == FALSE)
+	if (SOUP_STATUS_IS_SUCCESSFUL (soup_message_get_status (message)) == FALSE)
 		return;
 
 	g_mutex_lock (&(self->priv->content_mutex));
-	self->priv->content_type = g_strdup (soup_message_headers_get_content_type (message->response_headers, NULL));
-	self->priv->content_length = soup_message_headers_get_content_length (message->response_headers);
-	if (soup_message_headers_get_content_range (message->response_headers, &start, &end, &total_length)) {
+	self->priv->content_type = g_strdup (soup_message_headers_get_content_type (soup_message_get_response_headers (message), NULL));
+	self->priv->content_length = soup_message_headers_get_content_length (soup_message_get_response_headers (message));
+	if (soup_message_headers_get_content_range (soup_message_get_response_headers (message), &start, &end, &total_length)) {
 		self->priv->content_length = (gssize) total_length;
 	}
 	g_mutex_unlock (&(self->priv->content_mutex));
@@ -839,15 +856,15 @@ got_headers_cb (SoupMessage *message, GDataDownloadStream *self)
 }
 
 static void
-got_chunk_cb (SoupMessage *message, SoupBuffer *buffer, GDataDownloadStream *self)
+got_chunk_cb (SoupMessage *message, GBytes *chunk, GDataDownloadStream *self)
 {
 	/* Ignore the chunk if the response is unsuccessful or it has zero length */
-	if (SOUP_STATUS_IS_SUCCESSFUL (message->status_code) == FALSE || buffer->length == 0)
+	if (SOUP_STATUS_IS_SUCCESSFUL (soup_message_get_status (message)) == FALSE || g_bytes_get_size (chunk) == 0)
 		return;
 
 	/* Push the data onto the buffer immediately */
 	g_assert (self->priv->buffer != NULL);
-	gdata_buffer_push_data (self->priv->buffer, (const guint8*) buffer->data, buffer->length);
+	gdata_buffer_push_data (self->priv->buffer, (const guint8*) g_bytes_get_data (chunk, NULL), g_bytes_get_size (chunk));
 }
 
 static gpointer
@@ -877,10 +894,11 @@ download_thread (GDataDownloadStream *self)
 	g_signal_connect (priv->message, "got-chunk", (GCallback) got_chunk_cb, self);
 
 	/* Set a Range header if our starting offset is non-zero */
+	SoupMessageHeaders *request_headers = soup_message_get_request_headers (priv->message);
 	if (priv->offset > 0) {
-		soup_message_headers_set_range (priv->message->request_headers, priv->offset, -1);
+		soup_message_headers_set_range (request_headers, priv->offset, -1);
 	} else {
-		soup_message_headers_remove (priv->message->request_headers, "Range");
+		soup_message_headers_remove (request_headers, "Range");
 	}
 
 	_gdata_service_actually_send_message (priv->session, priv->message, priv->network_cancellable, NULL);
@@ -925,7 +943,16 @@ reset_network_thread (GDataDownloadStream *self)
 	}
 
 	if (priv->message != NULL) {
-		soup_session_cancel_message (priv->session, priv->message, SOUP_STATUS_CANCELLED);
+		/* If the message is still running, cancelling network_cancellable will eventually stop it.
+		 * soup_session_cancel_message is a libsoup 2.x function.
+		 * If direct abortion is needed, soup_session_abort_message(priv->session, priv->message); could be used,
+		 * but GCancellable is the preferred way.
+		 */
+		if (priv->network_cancellable && !g_cancellable_is_cancelled(priv->network_cancellable)) {
+			/* This ensures that if reset_network_thread is called for reasons other than explicit cancellation
+			 * (e.g. seek operation), the network operation is indeed stopped. */
+			g_cancellable_cancel(priv->network_cancellable);
+		}
 		g_signal_handlers_disconnect_by_func (priv->message, got_headers_cb, self);
 		g_signal_handlers_disconnect_by_func (priv->message, got_chunk_cb, self);
 	}

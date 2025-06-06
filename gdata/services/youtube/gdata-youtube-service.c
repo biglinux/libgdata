@@ -1,3 +1,4 @@
+#include <libsoup-3.0/libsoup/soup-message.h> /* Force include for soup_message_get_response_body_bytes */
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 8; tab-width: 8 -*- */
 /*
  * GData Client
@@ -247,7 +248,9 @@
 #include <config.h>
 #include <glib.h>
 #include <glib/gi18n-lib.h>
+#include <gio/gio.h> /* For GUri and other GIO types */
 #include <libsoup-3.0/libsoup/soup.h>
+/* soup-message.h is force-included at the top of the file */
 #include <string.h>
 
 #include "gdata-youtube-service.h"
@@ -396,6 +399,8 @@ append_query_headers (GDataService *self, GDataAuthorizationDomain *domain,
                       SoupMessage *message)
 {
 	GDataYouTubeServicePrivate *priv = GDATA_YOUTUBE_SERVICE (self)->priv;
+	GUri *uri = NULL; /* owned */
+	GUri *new_uri_with_dev_key = NULL; /* owned */
 
 	g_assert (message != NULL);
 
@@ -403,26 +408,31 @@ append_query_headers (GDataService *self, GDataAuthorizationDomain *domain,
 	    !gdata_authorizer_is_authorized_for_domain (gdata_service_get_authorizer (GDATA_SERVICE (self)),
 	                                                get_youtube_authorization_domain ())) {
 		const gchar *query;
-		SoupURI *uri;
 
-		uri = soup_message_get_uri (message);
-		query = soup_uri_get_query (uri);
+		uri = soup_message_get_uri (message); /* This is a GUri* in libsoup3, effectively a get_and_ref */
+		query = g_uri_get_query (uri);
 
 		/* Set the key on every unauthorised request:
 		 * https://developers.google.com/youtube/v3/docs/standard_parameters#key */
+		/* soup_uri_set_query modified in-place, g_uri_set_query returns new */
+		GString *new_query_str;
 		if (query != NULL) {
-			GString *new_query;
-
-			new_query = g_string_new (query);
-
-			g_string_append (new_query, "&key=");
-			g_string_append_uri_escaped (new_query,
-			                             priv->developer_key, NULL,
-			                             FALSE);
-
-			soup_uri_set_query (uri, new_query->str);
-			g_string_free (new_query, TRUE);
+			new_query_str = g_string_new (query);
+			g_string_append (new_query_str, "&key=");
+		} else {
+			new_query_str = g_string_new ("key=");
 		}
+
+		g_string_append_uri_escaped (new_query_str,
+		                             priv->developer_key, NULL,
+		                             FALSE);
+
+		new_uri_with_dev_key = g_uri_set_query (uri, new_query_str->str);
+		soup_message_set_uri(message, new_uri_with_dev_key);
+
+		g_string_free (new_query_str, TRUE);
+		g_uri_unref (uri); /* Unref original GUri obtained from soup_message_get_uri */
+		g_uri_unref (new_uri_with_dev_key); /* Unref new GUri as soup_message_set_uri takes its own ref or copies */
 	}
 
 	/* Chain up to the parent class */
@@ -1120,12 +1130,18 @@ gdata_youtube_service_get_categories (GDataYouTubeService *self, GCancellable *c
 	if (message == NULL)
 		return NULL;
 
-	g_assert (message->response_body->data != NULL);
+	GBytes *response_bytes = soup_message_get_response_body_bytes (message);
+	g_assert (response_bytes != NULL); /* Should have data if message is not NULL and no error occurred */
+
+	gsize response_length = 0;
+	const void *response_data = g_bytes_get_data (response_bytes, &response_length);
+
 	categories = GDATA_APP_CATEGORIES (_gdata_parsable_new_from_json (GDATA_TYPE_APP_CATEGORIES,
-	                                                                  message->response_body->data,
-	                                                                  message->response_body->length,
+	                                                                  (const char *) response_data,
+	                                                                  response_length,
 	                                                                  GSIZE_TO_POINTER (GDATA_TYPE_YOUTUBE_CATEGORY),
 	                                                                  error));
+	g_bytes_unref (response_bytes);
 	g_object_unref (message);
 
 	return categories;

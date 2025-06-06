@@ -144,7 +144,12 @@
 #include <glib/gi18n-lib.h>
 
 #include "gdata-oauth2-authorizer.h"
-#include "gdata-private.h"
+#include "gdata-private.h" /* Includes <libsoup-3.0/libsoup/soup.h> */
+#include <libsoup-3.0/libsoup/soup-message.h> /* For SoupMessage functions */
+#include <libsoup-3.0/libsoup/soup-form.h> /* For soup_form_encode */
+#include <gio/gio.h> /* For G_IO_ERROR_CANCELLED and GUri */
+#include <glib/guri.h> /* For GUri - already included by gio.h but to be explicit */
+
 
 static void authorizer_init (GDataAuthorizerInterface *iface);
 static void dispose (GObject *object);
@@ -603,7 +608,7 @@ static void
 sign_message_locked (GDataOAuth2Authorizer *self, SoupMessage *message,
                      const gchar *access_token)
 {
-	SoupURI *message_uri;  /* unowned */
+	GUri *message_uri;  /* unowned, from soup_message_get_uri */
 	gchar *auth_header = NULL;  /* owned */
 
 	g_return_if_fail (GDATA_IS_OAUTH2_AUTHORIZER (self));
@@ -615,20 +620,23 @@ sign_message_locked (GDataOAuth2Authorizer *self, SoupMessage *message,
 	 * token to anyone snooping the connection, which would give
 	 * them the same rights as us on the user’s data. Generally a
 	 * bad thing to happen. */
-	message_uri = soup_message_get_uri (message);
+	message_uri = soup_message_get_uri (message); /* This is GUri* in libsoup3 */
 
-	if (message_uri->scheme != SOUP_URI_SCHEME_HTTPS) {
+	if (g_strcmp0 (g_uri_get_scheme (message_uri), "https") != 0) {
 		g_warning ("Not authorizing a non-HTTPS message with the "
 		           "user’s OAuth 2.0 access token as the connection "
 		           "isn’t secure.");
+		/* Note: soup_message_get_uri returns a (transfer none) GUri that should not be freed here.
+		   If it were a SoupURI, it would also be (transfer none). */
 		return;
 	}
 
 	/* Add the authorisation header. */
 	auth_header = g_strdup_printf ("Bearer %s", access_token);
-	soup_message_headers_append (message->request_headers,
+	soup_message_headers_append (soup_message_get_request_headers (message),
 	                             "Authorization", auth_header);
 	g_free (auth_header);
+	/* g_uri_unref (message_uri); Not needed as it's (transfer none) */
 }
 
 static gboolean
@@ -638,7 +646,8 @@ refresh_authorization (GDataAuthorizer *self, GCancellable *cancellable,
 	/* See http://code.google.com/apis/accounts/docs/OAuth2.html#IAMoreToken */
 	GDataOAuth2AuthorizerPrivate *priv;
 	SoupMessage *message = NULL;  /* owned */
-	SoupURI *_uri = NULL;  /* owned */
+	GUri *_uri = NULL;  /* owned */
+	GUri *temp_uri = NULL; /* owned */
 	gchar *request_body;
 	guint status;
 	GError *child_error = NULL;
@@ -667,43 +676,64 @@ refresh_authorization (GDataAuthorizer *self, GCancellable *cancellable,
 	g_mutex_unlock (&priv->mutex);
 
 	/* Build the message */
-	_uri = soup_uri_new ("https://accounts.google.com/o/oauth2/token");
-	soup_uri_set_port (_uri, _gdata_service_get_https_port ());
+	_uri = g_uri_parse ("https://accounts.google.com/o/oauth2/token", G_URI_FLAGS_NONE, NULL);
+	if (_uri) {
+		temp_uri = g_uri_set_port(_uri, _gdata_service_get_https_port ());
+		g_uri_unref (_uri);
+		_uri = temp_uri;
+	}
 	message = soup_message_new_from_uri (SOUP_METHOD_POST, _uri);
-	soup_uri_free (_uri);
+	if (_uri) {
+		g_uri_unref (_uri);
+	}
 
-	soup_message_set_request (message, "application/x-www-form-urlencoded",
-	                          SOUP_MEMORY_TAKE, request_body,
-	                          strlen (request_body));
+	GBytes *request_gbytes = g_bytes_new_take (request_body, strlen (request_body));
+	soup_message_set_request_body_from_bytes (message, "application/x-www-form-urlencoded", request_gbytes);
+	g_bytes_unref (request_gbytes);
+	/* request_body is now owned by request_gbytes, no need to free it separately */
 
 	/* Send the message */
+	/* Note: _gdata_service_actually_send_message is internal and presumably populates the GError for cancellation */
 	_gdata_service_actually_send_message (priv->session, message,
-	                                      cancellable, error);
-	status = message->status_code;
+	                                      cancellable, error); /* Pass the main error pointer */
+	status = soup_message_get_status (message);
 
-	if (status == SOUP_STATUS_CANCELLED) {
-		/* Cancelled (the error has already been set) */
+	if (error != NULL && *error != NULL && (*error)->domain == G_IO_ERROR && (*error)->code == G_IO_ERROR_CANCELLED) {
+		/* Cancelled (the error has already been set by _gdata_service_actually_send_message) */
 		g_object_unref (message);
 		return FALSE;
 	} else if (status != SOUP_STATUS_OK) {
+		GBytes *response_gbytes_err = soup_message_get_response_body_bytes (message);
+		const char *response_data_err = NULL;
+		gsize response_length_err = 0;
+		if (response_gbytes_err) {
+			response_data_err = g_bytes_get_data (response_gbytes_err, &response_length_err);
+		}
 		parse_grant_error (GDATA_OAUTH2_AUTHORIZER (self),
-		                   status, message->reason_phrase,
-		                   message->response_body->data,
-		                   message->response_body->length,
-		                   error);
+		                   status, soup_message_get_reason_phrase (message),
+		                   response_data_err,
+		                   response_length_err,
+		                   error); /* Propagate error directly */
+		if (response_gbytes_err) {
+			g_bytes_unref (response_gbytes_err);
+		}
 		g_object_unref (message);
-
 		return FALSE;
 	}
 
-	g_assert (message->response_body->data != NULL);
+	GBytes *response_gbytes_ok = soup_message_get_response_body_bytes (message);
+	g_assert (response_gbytes_ok != NULL); /* Successful OK status should have a body */
+
+	gsize response_length_ok = 0;
+	const char *response_data_ok = g_bytes_get_data (response_gbytes_ok, &response_length_ok);
 
 	/* Parse and handle the response */
 	parse_grant_response (GDATA_OAUTH2_AUTHORIZER (self),
-	                      status, message->reason_phrase,
-	                      message->response_body->data,
-	                      message->response_body->length, &child_error);
+	                      status, soup_message_get_reason_phrase (message),
+	                      response_data_ok,
+	                      response_length_ok, &child_error);
 
+	g_bytes_unref (response_gbytes_ok);
 	g_object_unref (message);
 
 	if (child_error != NULL) {
@@ -1156,7 +1186,8 @@ gdata_oauth2_authorizer_request_authorization (GDataOAuth2Authorizer *self,
 {
 	GDataOAuth2AuthorizerPrivate *priv;
 	SoupMessage *message = NULL;  /* owned */
-	SoupURI *_uri = NULL;  /* owned */
+	GUri *_uri = NULL;  /* owned */
+	GUri *temp_uri = NULL; /* owned */
 	gchar *request_body = NULL;  /* owned */
 	guint status;
 	GError *child_error = NULL;
@@ -1182,42 +1213,61 @@ gdata_oauth2_authorizer_request_authorization (GDataOAuth2Authorizer *self,
 	                                 NULL);
 
 	/* Build the message */
-	_uri = soup_uri_new ("https://accounts.google.com/o/oauth2/token");
-	soup_uri_set_port (_uri, _gdata_service_get_https_port ());
+	_uri = g_uri_parse ("https://accounts.google.com/o/oauth2/token", G_URI_FLAGS_NONE, NULL);
+	if (_uri) {
+		temp_uri = g_uri_set_port(_uri, _gdata_service_get_https_port ());
+		g_uri_unref (_uri);
+		_uri = temp_uri;
+	}
 	message = soup_message_new_from_uri (SOUP_METHOD_POST, _uri);
-	soup_uri_free (_uri);
+	if (_uri) {
+		g_uri_unref (_uri);
+	}
 
-	soup_message_set_request (message, "application/x-www-form-urlencoded",
-	                          SOUP_MEMORY_TAKE, request_body,
-	                          strlen (request_body));
-	request_body = NULL;
+	GBytes *request_gbytes = g_bytes_new_take (request_body, strlen (request_body));
+	soup_message_set_request_body_from_bytes (message, "application/x-www-form-urlencoded", request_gbytes);
+	g_bytes_unref (request_gbytes);
+	request_body = NULL; /* Ownership taken by g_bytes_new_take */
 
 	/* Send the message */
 	_gdata_service_actually_send_message (priv->session, message,
-	                                      cancellable, error);
-	status = message->status_code;
+	                                      cancellable, error); /* Pass main error pointer */
+	status = soup_message_get_status (message);
 
-	if (status == SOUP_STATUS_CANCELLED) {
-		/* Cancelled (the error has already been set) */
+	if (error != NULL && *error != NULL && (*error)->domain == G_IO_ERROR && (*error)->code == G_IO_ERROR_CANCELLED) {
+		/* Cancelled (the error has already been set by _gdata_service_actually_send_message) */
 		g_object_unref (message);
 		return FALSE;
 	} else if (status != SOUP_STATUS_OK) {
-		parse_grant_error (self, status, message->reason_phrase,
-		                   message->response_body->data,
-		                   message->response_body->length,
-		                   error);
+		GBytes *response_gbytes_err = soup_message_get_response_body_bytes (message);
+		const char *response_data_err = NULL;
+		gsize response_length_err = 0;
+		if (response_gbytes_err) {
+			response_data_err = g_bytes_get_data (response_gbytes_err, &response_length_err);
+		}
+		parse_grant_error (self, status, soup_message_get_reason_phrase (message),
+		                   response_data_err,
+		                   response_length_err,
+		                   error); /* Propagate error directly */
+		if (response_gbytes_err) {
+			g_bytes_unref (response_gbytes_err);
+		}
 		g_object_unref (message);
-
 		return FALSE;
 	}
 
-	g_assert (message->response_body->data != NULL);
+	GBytes *response_gbytes_ok = soup_message_get_response_body_bytes (message);
+	g_assert (response_gbytes_ok != NULL); /* Successful OK status should have a body */
+
+	gsize response_length_ok = 0;
+	const char *response_data_ok = g_bytes_get_data (response_gbytes_ok, &response_length_ok);
 
 	/* Parse and handle the response */
-	parse_grant_response (self, status, message->reason_phrase,
-	                      message->response_body->data,
-	                      message->response_body->length, &child_error);
+	parse_grant_response (self, status, soup_message_get_reason_phrase (message),
+	                      response_data_ok,
+	                      response_length_ok, &child_error);
 
+	g_bytes_unref (response_gbytes_ok);
 	g_object_unref (message);
 
 	if (child_error != NULL) {
@@ -1511,7 +1561,7 @@ gdata_oauth2_authorizer_get_timeout (GDataOAuth2Authorizer *self)
 	g_return_val_if_fail (GDATA_IS_OAUTH2_AUTHORIZER (self), 0);
 
 	g_object_get (self->priv->session,
-	              SOUP_SESSION_TIMEOUT, &timeout,
+	              "timeout", &timeout,
 	              NULL);
 
 	return timeout;
@@ -1539,7 +1589,7 @@ gdata_oauth2_authorizer_set_timeout (GDataOAuth2Authorizer *self, guint timeout)
 		return;
 	}
 
-	g_object_set (self->priv->session, SOUP_SESSION_TIMEOUT, timeout, NULL);
+	g_object_set (self->priv->session, "timeout", timeout, NULL);
 }
 
 /**

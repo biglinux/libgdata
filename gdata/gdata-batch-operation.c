@@ -100,8 +100,9 @@
 #include "gdata-batch-operation.h"
 #include "gdata-batch-feed.h"
 #include "gdata-batchable.h"
-#include "gdata-private.h"
+#include "gdata-private.h" /* Includes <libsoup-3.0/libsoup/soup.h> and <libsoup-3.0/libsoup/soup-message.h> */
 #include "gdata-batch-private.h"
+#include <gio/gio.h> /* For G_IO_ERROR_CANCELLED */
 
 static void operation_free (BatchOperation *op);
 
@@ -673,7 +674,9 @@ gdata_batch_operation_run (GDataBatchOperation *self, GCancellable *cancellable,
 	}
 
 	upload_data = gdata_parsable_get_xml (GDATA_PARSABLE (feed));
-	soup_message_set_request (message, "application/atom+xml", SOUP_MEMORY_TAKE, upload_data, strlen (upload_data));
+	GBytes *upload_gbytes = g_bytes_new_take (upload_data, strlen (upload_data));
+	soup_message_set_request_body_from_bytes (message, "application/atom+xml", upload_gbytes);
+	g_bytes_unref (upload_gbytes);
 
 	g_object_unref (feed);
 
@@ -684,13 +687,25 @@ gdata_batch_operation_run (GDataBatchOperation *self, GCancellable *cancellable,
 	status = _gdata_service_send_message (priv->service, message, cancellable, &child_error);
 
 	if (status != SOUP_STATUS_OK) {
-		/* Iff status is SOUP_STATUS_NONE or SOUP_STATUS_CANCELLED, child_error has already been set */
-		if (status != SOUP_STATUS_NONE && status != SOUP_STATUS_CANCELLED) {
+		/* If status is SOUP_STATUS_NONE or operation was cancelled, child_error has already been set by _gdata_service_send_message */
+		if (status != SOUP_STATUS_NONE && !(child_error != NULL && child_error->domain == G_IO_ERROR && child_error->code == G_IO_ERROR_CANCELLED)) {
 			/* Error */
 			GDataServiceClass *klass = GDATA_SERVICE_GET_CLASS (priv->service);
+			GBytes *response_bytes = NULL;
+			const char *response_data = NULL;
+			gsize response_length = 0;
+
 			g_assert (klass->parse_error_response != NULL);
-			klass->parse_error_response (priv->service, GDATA_OPERATION_BATCH, status, message->reason_phrase, message->response_body->data,
-			                             message->response_body->length, &child_error);
+			response_bytes = soup_message_get_response_body_bytes (message);
+			if (response_bytes) {
+				response_data = g_bytes_get_data (response_bytes, &response_length);
+			}
+
+			klass->parse_error_response (priv->service, GDATA_OPERATION_BATCH, status, soup_message_get_reason_phrase (message), response_data,
+			                             response_length, &child_error);
+			if (response_bytes) {
+				g_bytes_unref (response_bytes);
+			}
 		}
 		g_object_unref (message);
 
@@ -698,9 +713,15 @@ gdata_batch_operation_run (GDataBatchOperation *self, GCancellable *cancellable,
 	}
 
 	/* Parse the XML; GDataBatchFeed will fire off the relevant callbacks */
-	g_assert (message->response_body->data != NULL);
-	feed = GDATA_FEED (_gdata_parsable_new_from_xml (GDATA_TYPE_BATCH_FEED, message->response_body->data, message->response_body->length,
+	GBytes *response_bytes = soup_message_get_response_body_bytes (message);
+	g_assert (response_bytes != NULL); /* Successful OK status should have a body */
+
+	gsize response_length = 0;
+	const char *response_data = g_bytes_get_data (response_bytes, &response_length);
+
+	feed = GDATA_FEED (_gdata_parsable_new_from_xml (GDATA_TYPE_BATCH_FEED, response_data, response_length,
 	                                                 self, &child_error));
+	g_bytes_unref (response_bytes);
 	g_object_unref (message);
 
 	if (feed == NULL)

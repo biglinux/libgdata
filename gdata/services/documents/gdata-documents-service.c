@@ -1,3 +1,4 @@
+#include <libsoup-3.0/libsoup/soup-message.h> /* Force include for soup_message_get_response_body_bytes */
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 8; tab-width: 8 -*- */
 /*
  * GData Client
@@ -25,6 +26,9 @@
 #include <glib/gi18n-lib.h>
 #include <glib/guri.h>
 #include <string.h>
+#include <gio/gio.h> /* For G_IO_ERROR_CANCELLED and other GIO types */
+#include <libsoup-3.0/libsoup/soup.h>
+/* #include <libsoup-3.0/libsoup/soup-message.h> -- Now at the very top */
 
 // Central private header, should include libsoup and other common internal deps
 #include "gdata-private.h"
@@ -157,7 +161,7 @@ gdata_documents_service_get_metadata (GDataDocumentsService *self, GCancellable 
 
 	status = _gdata_service_send_message (GDATA_SERVICE (self), message, cancellable, error);
 
-	if (status == SOUP_STATUS_NONE || status == SOUP_STATUS_CANCELLED) {
+	if (status == SOUP_STATUS_NONE || (error != NULL && (*error)->domain == G_IO_ERROR && (*error)->code == G_IO_ERROR_CANCELLED)) {
 		g_object_unref (message);
 		return NULL;
 	} else if (status != SOUP_STATUS_OK) {
@@ -187,7 +191,11 @@ gdata_documents_service_get_metadata (GDataDocumentsService *self, GCancellable 
 	if (response_bytes_ptr) {
 		response_data = g_bytes_get_data (response_bytes_ptr, &response_length);
 	}
-	g_assert (response_data != NULL);
+	if (response_length > 0) {
+		g_assert (response_data != NULL);
+	} else {
+		/* Allow empty response data if length is 0 */
+	}
 	metadata = GDATA_DOCUMENTS_METADATA (gdata_parsable_new_from_json (GDATA_TYPE_DOCUMENTS_METADATA, response_data, response_length,
 	                                                                    error));
 	if (response_bytes_ptr) {
@@ -725,7 +733,7 @@ gdata_documents_service_add_entry_to_folder (GDataDocumentsService *self, GDataD
 
 	status = _gdata_service_send_message (GDATA_SERVICE (self), message, cancellable, error);
 
-	if (status == SOUP_STATUS_NONE || status == SOUP_STATUS_CANCELLED) {
+	if (status == SOUP_STATUS_NONE || (error != NULL && (*error)->domain == G_IO_ERROR && (*error)->code == G_IO_ERROR_CANCELLED)) {
 		g_object_unref (message);
 		return NULL;
 	} else if (status != SOUP_STATUS_OK) {
@@ -755,7 +763,11 @@ gdata_documents_service_add_entry_to_folder (GDataDocumentsService *self, GDataD
 	if (response_bytes_ptr) {
 		response_data = g_bytes_get_data (response_bytes_ptr, &response_length);
 	}
-	g_assert (response_data != NULL);
+	if (response_length > 0) {
+		g_assert (response_data != NULL);
+	} else {
+		/* Allow empty response data if length is 0 */
+	}
 	new_entry = GDATA_DOCUMENTS_ENTRY (gdata_parsable_new_from_json (entry_type, response_data, response_length,
 									 error));
 	if (response_bytes_ptr) {
@@ -908,7 +920,7 @@ gdata_documents_service_remove_entry_from_folder (GDataDocumentsService *self, G
 
 	status = _gdata_service_send_message (GDATA_SERVICE (self), message, cancellable, error);
 
-	if (status == SOUP_STATUS_NONE || status == SOUP_STATUS_CANCELLED) {
+	if (status == SOUP_STATUS_NONE || (error != NULL && (*error)->domain == G_IO_ERROR && (*error)->code == G_IO_ERROR_CANCELLED)) {
 		g_object_unref (message);
 		return NULL;
 	} else if (status != SOUP_STATUS_OK && status != SOUP_STATUS_NO_CONTENT) {

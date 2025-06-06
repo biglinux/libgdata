@@ -23,6 +23,7 @@
 #include <glib.h>
 #include <libxml/parser.h>
 #include <libsoup-3.0/libsoup/soup.h>
+#include <libsoup-3.0/libsoup/soup-message.h> /* Ensure SoupMessage definitions are available */
 
 #include <gdata/gdata-service.h>
 

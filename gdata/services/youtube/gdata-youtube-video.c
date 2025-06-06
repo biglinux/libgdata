@@ -62,8 +62,10 @@
 #include <config.h>
 #include <glib.h>
 #include <glib/gi18n-lib.h>
+#include <glib/guri.h> /* For GUri */
 #include <json-glib/json-glib.h>
 #include <string.h>
+#include <libsoup-3.0/libsoup/soup-form.h> /* For soup_form_decode */
 
 #include "gdata-youtube-video.h"
 #include "gdata-private.h"
@@ -2181,22 +2183,26 @@ gchar *
 gdata_youtube_video_get_video_id_from_uri (const gchar *video_uri)
 {
 	gchar *video_id = NULL;
-	SoupURI *uri;
+	GUri *uri;
+	const gchar *host, *query, *fragment;
 
 	g_return_val_if_fail (video_uri != NULL && *video_uri != '\0', NULL);
 
 	/* Extract the query string from the URI */
-	uri = soup_uri_new (video_uri);
+	uri = g_uri_parse (video_uri, G_URI_FLAGS_NONE, NULL);
 	if (uri == NULL)
 		return NULL;
-	else if (uri->host == NULL || strstr (uri->host, "youtube") == NULL) {
-		soup_uri_free (uri);
+
+	host = g_uri_get_host (uri);
+	if (host == NULL || strstr (host, "youtube") == NULL) {
+		g_uri_unref (uri);
 		return NULL;
 	}
 
 	/* Try the "v" parameter (e.g. format is: http://www.youtube.com/watch?v=ylLzyHk54Z0) */
-	if (uri->query != NULL) {
-		GHashTable *params = soup_form_decode (uri->query);
+	query = g_uri_get_query (uri);
+	if (query != NULL) {
+		GHashTable *params = soup_form_decode (query);
 		video_id = g_strdup (g_hash_table_lookup (params, "v"));
 		g_hash_table_destroy (params);
 	}
@@ -2204,10 +2210,11 @@ gdata_youtube_video_get_video_id_from_uri (const gchar *video_uri)
 	/* Try the "v" fragment component (e.g. format is: http://www.youtube.com/watch#!v=ylLzyHk54Z0).
 	 * YouTube introduced this new URI format in March 2010:
 	 * http://apiblog.youtube.com/2010/03/upcoming-change-to-youtube-video-page.html */
-	if (video_id == NULL && uri->fragment != NULL) {
+	fragment = g_uri_get_fragment (uri);
+	if (video_id == NULL && fragment != NULL) {
 		gchar **components, **i;
 
-		components = g_strsplit (uri->fragment, "!", -1);
+		components = g_strsplit (fragment, "!", -1);
 		for (i = components; *i != NULL; i++) {
 			if (**i == 'v' && *((*i) + 1) == '=') {
 				video_id = g_strdup ((*i) + 2);
@@ -2217,7 +2224,7 @@ gdata_youtube_video_get_video_id_from_uri (const gchar *video_uri)
 		g_strfreev (components);
 	}
 
-	soup_uri_free (uri);
+	g_uri_unref (uri);
 
 	return video_id;
 }

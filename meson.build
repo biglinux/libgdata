@@ -85,6 +85,8 @@ gdata_deps = [
 common_c_args = [
   '-DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_62',
   '-DGLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_68',
+  '-include',
+  '/usr/include/libsoup-3.0/libsoup/soup-message.h',
 ]
 
 # Private dependencies for libgdata (specifically used for pkgconfig)

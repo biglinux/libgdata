@@ -71,7 +71,7 @@
 
 #include "services/calendar/gdata-calendar-service.h"
 #include "services/documents/gdata-documents-service.h"
-#include "services/picasaweb/gdata-picasaweb-service.h"
+/* #include "services/picasaweb/gdata-picasaweb-service.h" - Picasaweb is deprecated */
 
 #define HMAC_SHA1_LEN 20 /* bytes, raw */
 
@@ -184,9 +184,11 @@ gdata_goa_authorizer_set_goa_object (GDataGoaAuthorizer *self, GoaObject *goa_ob
 		add_authorization_domains (self, GDATA_TYPE_DOCUMENTS_SERVICE);
 	}
 	
+	/* Picasaweb is deprecated, remove Photos integration for now
 	if (goa_object_peek_photos (goa_object) != NULL) {
 		add_authorization_domains (self, GDATA_TYPE_PICASAWEB_SERVICE);
 	}
+	*/
 }
 
 static void

@@ -45,6 +45,9 @@
 #include "gdata-access-handler.h"
 #include "gdata-private.h"
 #include "gdata-access-rule.h"
+/* GDataService includes gdata-private.h, which includes soup.h.
+ * soup-message.h is needed for soup_message_get_response_body_bytes and soup_message_get_response_headers */
+#include <libsoup-3.0/libsoup/soup-message.h>
 
 static GDataFeed *
 gdata_access_handler_real_get_rules (GDataAccessHandler *self,
@@ -93,7 +96,7 @@ gdata_access_handler_real_get_rules (GDataAccessHandler *self,
 	GDataFeed *feed;
 	GDataLink *_link;
 	SoupMessage *message;
-	SoupMessageHeaders *headers;
+	const SoupMessageHeaders *headers; /* soup_message_get_response_headers returns const */
 	const gchar *content_type;
 
 	_link = gdata_entry_look_up_link (GDATA_ENTRY (self), GDATA_LINK_ACCESS_CONTROL_LIST);
@@ -109,24 +112,29 @@ gdata_access_handler_real_get_rules (GDataAccessHandler *self,
 		return NULL;
 	}
 
-	g_assert (message->response_body->data != NULL);
+	GBytes *response_bytes = soup_message_get_response_body_bytes (message);
+	g_assert (response_bytes != NULL); /* Should have data if message is not NULL and no error occurred */
 
-	headers = message->response_headers;
+	gsize response_length = 0;
+	const void *response_data = g_bytes_get_data (response_bytes, &response_length);
+
+	headers = soup_message_get_response_headers (message);
 	content_type = soup_message_headers_get_content_type (headers, NULL);
 
 	if (g_strcmp0 (content_type, "application/json") == 0) {
 		/* Definitely JSON. */
 		g_debug("JSON content type detected.");
-		feed = _gdata_feed_new_from_json (GDATA_TYPE_FEED, message->response_body->data, message->response_body->length, GDATA_TYPE_ACCESS_RULE,
+		feed = _gdata_feed_new_from_json (GDATA_TYPE_FEED, (const char *) response_data, response_length, GDATA_TYPE_ACCESS_RULE,
 		                                  progress_callback, progress_user_data, error);
 	} else {
 		/* Potentially XML. Don't bother checking the Content-Type, since the parser
 		 * will fail gracefully if the response body is not valid XML. */
 		g_debug("XML content type detected.");
-		feed = _gdata_feed_new_from_xml (GDATA_TYPE_FEED, message->response_body->data, message->response_body->length, GDATA_TYPE_ACCESS_RULE,
+		feed = _gdata_feed_new_from_xml (GDATA_TYPE_FEED, (const char *) response_data, response_length, GDATA_TYPE_ACCESS_RULE,
 		                                 progress_callback, progress_user_data, error);
 	}
 
+	g_bytes_unref (response_bytes);
 	g_object_unref (message);
 
 	return feed;

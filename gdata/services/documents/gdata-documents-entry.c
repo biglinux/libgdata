@@ -1,3 +1,4 @@
+#include <libsoup-3.0/libsoup/soup-message.h> /* Force include for soup_message_get_response_body_bytes */
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 8; tab-width: 8 -*- */
 /*
  * GData Client
@@ -97,8 +98,10 @@
 #include <config.h>
 #include <glib.h>
 #include <glib/gi18n-lib.h>
+
+/* Ensure libsoup headers are included before other files that might use its types indirectly */
 #include <libsoup-3.0/libsoup/soup.h>
-#include <libsoup-3.0/libsoup/soup-message.h>
+/* #include <libsoup-3.0/libsoup/soup-message.h> -- Now at the very top */
 
 #include "gdata-comparable.h"
 #include "gdata-documents-entry.h"
@@ -359,7 +362,11 @@ get_rules (GDataAccessHandler *self,
 		response_data = g_bytes_get_data (response_bytes_ptr, &response_length);
 	}
 
-	g_assert (response_data != NULL);
+	if (response_length > 0) {
+		g_assert (response_data != NULL);
+	} else {
+		/* Allow empty response data if length is 0 */
+	}
 
 	feed = _gdata_feed_new_from_json (GDATA_TYPE_FEED, response_data, response_length, GDATA_TYPE_DOCUMENTS_ACCESS_RULE,
 					  progress_callback, progress_user_data, error);

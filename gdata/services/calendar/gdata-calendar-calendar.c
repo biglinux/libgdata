@@ -1,3 +1,4 @@
+#include <libsoup-3.0/libsoup/soup-message.h> /* Force include for soup_message_get_response_body_bytes */
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 8; tab-width: 8 -*- */
 /*
  * GData Client
@@ -74,12 +75,14 @@
  * </example>
  */
 
+/* Ensure libsoup headers are included before ANYTHING else */
+#include <libsoup-3.0/libsoup/soup.h>
+/* #include <libsoup-3.0/libsoup/soup-message.h> -- Now at the very top */
+
 #include <config.h>
 #include <glib.h>
 #include <glib/gi18n-lib.h>
 #include <string.h>
-#include <libsoup-3.0/libsoup/soup.h>
-#include <libsoup-3.0/libsoup/soup-message.h>
 
 #include "gdata-calendar-calendar.h"
 #include "gdata-private.h"
@@ -256,7 +259,11 @@ get_rules (GDataAccessHandler *self,
 		response_data = g_bytes_get_data (response_bytes_ptr, &response_length);
 	}
 
-	g_assert (response_data != NULL);
+	if (response_length > 0) {
+		g_assert (response_data != NULL);
+	} else {
+		/* Allow empty response data if length is 0 */
+	}
 
 	feed = _gdata_feed_new_from_json (GDATA_TYPE_FEED,
 	                                  response_data,
